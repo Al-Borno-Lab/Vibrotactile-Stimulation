@@ -1,3 +1,11 @@
+import matplotlib.pyplot as plt    # MatPlotLib is a plotting package. 
+import numpy as np                 # NumPy is a numerical types package.
+from scipy import stats            # ScPy is a scientific computing package. We just want the stats, because Ca2+ imaging is always calculated in z-score.
+from scipy.stats import circmean
+import math
+from posixpath import join
+# from ..model import LIFNetwork as LIF
+
 def plot_structure(LIF, conn= False, conn_target = None):
   if conn == True and conn_target is None:
     conn_target = range(LIF.n_neurons)
@@ -160,7 +168,7 @@ def plotter(LIF,time,pN = 5):
 
 
 
-def plotter2(LIF:LIF_Network, 
+def plotter2(LIF:"LIF_Network", 
              sim_duration, 
              I:"ndarray", 
              pN = 5):
