@@ -1,0 +1,1877 @@
+# %% [markdown]
+# # [Draft] **Workbook for the study of coordinated reset in a simulation of subthalamic nucleus**
+
+# %% [markdown]
+# ## Author Informtation
+# This work was performed by Matteo Coscia(1), Anthony Lee (1), Jesse Gilmer(1), Ali Khaledi-Nasab(2), and Mazen Al Borno(1).
+# 
+# 1.   University of Colorado, School of Medicine - Computer Science and Bioengineering, and Computational Biology
+# 2.   Amazon - Amazon Web Services Network Capacity Team.
+# 
+# The following is a work in progress. Contact J. Gilmer for queries at: jesse dot gilmer at cuanschutz dot edu.
+
+# %% [markdown]
+# To Do:
+# * Refine results text.
+# * Rework plotting functions.
+# * Setup a github and merge structure for the project.
+# * Do research into STN connectivity and projection anatomy.
+# * Make an RL agent for frequency and sites.
+# * Make matrix form of structured_conn().
+
+# %% [markdown]
+# # Abstract
+
+# %% [markdown]
+# 
+# Abnormal synchrony in the subthalamic nucleus is thought to be an intermediate etiology in Parkinson's disease symptomology. The application of high-frequency stimulation through implanted deep brain stimulators is thought to offset or interrupt aberrant outputs of the neural structures impacted by Parkinson's. However, high frequency stimulation has a number of off-target effects that can severely impact the quality of life for patients receiving this therapy, neccessitating alternatives. Research into therapies that treat the disease state of Parkinson's while reducing side effects have shown that random patterned stimulations, termed coordinated reset, can be effective in treating Parkinson's without relying on high frequency stimulation, thereby reducing negative effects of the therapy. This therapy is also thought to be an improvement over high-frequency stimualtion because the duration of its beneficial effects persists for longer than traditional stimuli. Interestingly, coordinated reset can also be applied through peripheral stimulation of the fingers, presumably by altering the statistics of inputs to the subthalamic nucleus through an ascending sensory pathway. While this therapy has been somewhat successful in small clinical trials, it remains unclear what the optimal stimulus patterning should be to best alleviate Parkinsonian symptoms. Here, we reestablish a computational model previously used to test stimulation patterns in peripheral coordinated reset and test a wide range of potential stimulation parameters to assay their effect on changes to connectivity weighting and synchrony, and find that low frequency stimuli across a moderate number of tactile sites best reduces abnormal synchrony in the system. Building upon this, we applied a reinforcement learning approach to parameter selection and found [something]. Additionally, we explore the effect of stimulation site selection by examining the effect of stimualting targets whose neural representation is relatively proximal vs those that are represented distally within the subthalamic nucleus and found [something]. The outcomes from this modelling approach can help clinicians to select the best course for treating Parkinson's disease, and other diseases of abnormal neural synchrony, using non-invasive peripheral therapies.
+
+# %% [markdown]
+# # Methods
+
+# %% [markdown]
+# ## Model Dependencies
+# This model uses matplotlib, numpy, scipy, and the standard math package.
+# 
+
+# %%
+import matplotlib.pyplot as plt    # MatPlotLib is a plotting package. 
+import numpy as np                 # NumPy is a numerical types package.
+from scipy import stats            # ScPy is a scientific computing package. We just want the stats, because Ca2+ imaging is always calculated in z-score.
+from scipy.stats import circmean
+import math
+from posixpath import join
+from datetime import datetime
+
+# Setup in-notebook plotting:
+%matplotlib inline
+
+# %% [markdown]
+# ##Model Description:
+# This LIF model is based on Kromer et al., 2020. [Go to Citations](#scrollTo=nbz2NLycMZr5)
+# 
+# This model seeks to establish a model of a neural circuit with either random or spatially structured connectivity. This class also has several functions used for examining the model output, such as the cellular voltage, spike record, and changes in weight and synchrony over time. The default network is biased towards over-synchronization, which is meant to model the disease state of Parkinson's disease in the subthalamic nucleus, which has an abnormal degree of synchrony in Parkinsonian patients. 
+# 
+# The model uses a spike timing dependent plasticity (STDP) rule to alter the weights of synaptic connections between neurons in respone to spiking. This mechanism uses a Hebbian framework, such that neurons that spike after recieving an input from their presynapic partner will strengthen that synapse, and neurons that spike before recieving an input will weaken that synapse.
+# 
+# To assay the degree of synchrony in the network, we applied Kuramato's method to the spike timing on the neural population. To do this, we treated each spike as a vector on a circle with a period of 20ms, by default. The mean spiking vectors of each neuron were then projected onto the imaginary plane and averaged. The magnitude of the resultant mean was used to determine the synchrony of spiking, where a large vector (with a maximum of 1) indicates that all neurons are spiking at the same time, and a small vector (with a minimum of 0) indicating that all neurons are firing independently, with no shared patterning.
+# 
+
+# %%
+#@title LIF Model
+
+# Define LIF neurons:
+class LIF_Network:
+  def __init__(self, n_neurons = 1000, dimensions = [[0,100],[0,100],[0,100]]):
+    # Neuron count
+    self.n_neurons = n_neurons
+    
+    # spatial organization.
+    self.dimensions = dimensions;
+    self.x = np.random.uniform(low=self.dimensions[0][0], high=self.dimensions[0][1], size=(self.n_neurons,))
+    self.y = np.random.uniform(low=self.dimensions[1][0], high=self.dimensions[1][1], size=(self.n_neurons,))
+    self.z = np.random.uniform(low=self.dimensions[2][0], high=self.dimensions[2][1], size=(self.n_neurons,))
+
+    # internal time trackers
+    self.t = 0                 # current time [ms]
+    self.dt = .1               # time step [ms]
+    self.t_itt = 0             # time index
+    self.relax_time = 10000    # length of relaxation phase [ms]
+
+    # electrophysiology values
+    self.v = np.random.uniform(low=-10, high=10, size=(self.n_neurons,)) - 45               #  internal voltage [mV]
+    self.v_rest = -38                                                                       #  the resting voltage, equilibrium [mV] def: -38
+
+    self.v_thr = np.ones([self.n_neurons,]) * -40                                           #  reversal potential for spiking [mV]
+    self.v_rf_thr = np.ones([self.n_neurons,]) * -40                                        #  reversal potential for spiking during refractory period [mV]
+    self.v_rf_tau = 5                                                                       #  the relaxation tau between refractory and normal thresholds.
+
+    self.v_reset = -67                                                                      #  the reset, overshoot voltage [mV]
+    self.v_spike = 20                                                                       #  the voltage that spikes rise to [mV]
+    self.v_rf_spike = 0                                                                     #  the threshold that changes in the refractory period [mV]
+    self.spike_length = 1
+    self.spike_flag = np.zeros([self.n_neurons,])
+    self.t_spike1 = np.zeros([self.n_neurons,]) - 10000
+    self.t_spike2 = np.zeros([self.n_neurons,]) - 10000
+    self.spike_record = np.empty(shape=[1,2])
+    self.g_leak = 10                                                                        #  the conductance of the leak channels [nS]
+
+    tau_c1 = np.sqrt(-2 * np.log(np.random.random(size=(self.n_neurons,))))                 #  membrane time-constant component 1
+    tau_c2 = np.cos(2 * np.pi * np.random.random(size=(self.n_neurons,)))                   #  membrane time-constant component 2                                               
+    self.m_tau = 7.5 * tau_c1 * tau_c2 + 150                                                #  the membrane time-constant [ms]
+
+    self.syn_tau = 1                                                                        #  the synaptic time-constant [ms]
+    self.v_syn = 0                                                                          #  the voltage synapses push the cell membrane towards [mV]
+    self.syn_g = np.zeros([self.n_neurons,])                                                #  dynamic tracker of synaptic conductance.
+    
+    self.g_poisson = 1.3                                                                    #  the conductance of the extrinsic poisson inputs.
+    self.poisson_freq = 20 * self.dt * .001                                                 #  poisson input frequency
+    self.poisson_input = np.zeros([self.n_neurons,])                                        #  the input vector from external noise
+    self.noise_g = np.zeros([self.n_neurons,])                                              #  dynamic tracker of noise conductance.
+
+    # STDP paramters
+    self.stdp_beta = 1.4                                                                    #  the balance factor for LTP and LTD
+    self.stdp_tau_R = 4                                                                     #  used for the negative half of STDP
+    self.stdp_tau_plus = 10                                                                 #  used for the postive half of STDP
+    self.stdp_tau_neg = self.stdp_tau_R * self.stdp_tau_plus                                #  used for the negative half of STDP
+
+    self.lamda = 0.02
+    self.w_flag = np.zeros([self.n_neurons,])
+    
+    # Connectivity parameters
+    self.p_conn = .07                                                                       #  probability of presynaptic connections from other neurons.
+    self.mean_w = 0.5                                                                       #  mean conductance of synapses.
+    self.synaptic_delay = 3                                                                 #  the amount of time an AP takes to propogate [ms]. def: 3
+    C = 400
+    self.network_coupling = C/self.n_neurons                                                #  coupling strength of extrinsic input noise?
+    self.network_input = np.zeros([self.n_neurons,])                                        #  dynamic tracker of synaptic inputs
+    self.external_strength = C/5
+    self.network_conn = np.zeros([self.n_neurons,self.n_neurons])                           #  network connectivity
+    self.network_W = np.random.random(size=(self.n_neurons,self.n_neurons)) 
+    self.random_conn()
+
+  def random_conn(self,):
+    pc = np.random.random(size=(self.n_neurons,self.n_neurons))
+    self.network_conn = pc < self.p_conn
+    self.network_W = np.random.random(size=(self.n_neurons,self.n_neurons))
+    self.network_W[self.network_conn == 0] = 0
+    self.network_W = self.network_W/np.mean(self.network_W[self.network_W > 0]) * self.mean_w
+    self.network_W[self.network_W > 1] = 1
+    self.network_W[self.network_W < 0] = 0
+
+  # Jesse note: this function can be matrix-ized to save processing time. # To do.
+  def structured_conn(self,LIF,):
+    self.network_conn = np.zeros([self.n_neurons,self.n_neurons])  
+    dist=np.empty([self.n_neurons,self.n_neurons])
+    dist[:] = np.nan
+    dist1=[]
+    c=[]
+    for f in range(LIF.n_neurons-1):
+      i=f
+      for j in range(f+1,LIF.n_neurons,1):
+        a=(LIF.x[i]-LIF.x[j])*(LIF.x[i]-LIF.x[j])+(LIF.y[i]-LIF.y[j])*(LIF.y[i]-LIF.y[j])+(LIF.z[i]-LIF.z[j])*(LIF.z[i]-LIF.z[j])
+        b=np.sqrt(a)
+        c.append(b)
+      #print('distance between neurons', i+1, 'and', j+1, ': ', b)
+    d=sum(c)/len(c)
+    print('The average distance between neurons in this network is:', d)
+    print('The base of the exponent is:', LIF.p_conn**(1/d))
+    bb=[]
+    cc=[]
+    for p in range(LIF.n_neurons):
+      for p2 in range(LIF.n_neurons):
+        if(p!=p2):
+          a=(LIF.x[p]-LIF.x[p2])*(LIF.x[p]-LIF.x[p2])+(LIF.y[p]-LIF.y[p2])*(LIF.y[p]-LIF.y[p2])+(LIF.z[p]-LIF.z[p2])*(LIF.z[p]-LIF.z[p2])
+          b=np.sqrt(a)
+          dist1.append(b)
+    for p in range(LIF.n_neurons):
+      for p2 in range(LIF.n_neurons):
+        if(p!=p2):
+          a=(LIF.x[p]-LIF.x[p2])*(LIF.x[p]-LIF.x[p2])+(LIF.y[p]-LIF.y[p2])*(LIF.y[p]-LIF.y[p2])+(LIF.z[p]-LIF.z[p2])*(LIF.z[p]-LIF.z[p2])
+          b=np.sqrt(a)
+          #aa=((LIF.p_conn**(1/d)) ** b)
+          aa=2.71828**(-b/(LIF.p_conn*max(dist1)))
+          pc = np.random.random(size=(1,))
+          if(pc<aa):
+            self.network_conn[p][p2] = 1
+            dist[p][p2]=b
+    return dist
+    self.network_W = np.random.random(size=(self.n_neurons,self.n_neurons))
+    self.network_W[self.network_conn == 0] = 0
+    self.network_W = self.network_W/np.mean(self.network_W[self.network_W > 0]) * self.mean_w
+    self.network_W[self.network_W > 1] = 1
+    self.network_W[self.network_W < 0] = 0
+
+  def simulate_poisson(self,):
+    self.poisson_input = 1 * (np.random.rand(self.n_neurons,) < self.poisson_freq)
+  
+  def assaySTDP(self):
+    %matplotlib inline
+    fig = plt.figure()
+
+    for i in range(-100,100,1):
+      plt.scatter(i,self.Delta_W_tau(i,0,0),s=2,c='k')
+
+    plt.ylabel('dW')
+    plt.xlabel('time offset (pre - post)')
+    plt.title('STDP curve')
+    plt.show()
+    self.random_conn()
+    
+  def Delta_W_tau(self,time_diff,i,j):
+    dW = 0
+    if time_diff < -0.01:
+      dW = self.lamda * np.exp( time_diff / self.stdp_tau_plus )
+    
+    if time_diff > 0.01:
+      dW = -(self.stdp_beta/self.stdp_tau_R) * self.lamda * np.exp( -time_diff / self.stdp_tau_neg)
+
+    self.network_W[i][j] = self.network_W[i][j] + dW
+    self.network_W[self.network_W > 1] = 1
+    self.network_W[self.network_W < 0] = 0
+    return dW
+
+  def spikeTrain(self,lookBack=None, nNeurons = 5, purge=False):
+    if lookBack is None:
+      lookBack = self.t
+    lookBack = self.t - lookBack
+
+    SR = np.reshape(self.spike_record,newshape = [-1,2])
+    SR = np.delete(SR, 0, 0)
+    SRix = np.argmax(SR[:,1] >= lookBack)
+    SR = SR[SRix:,:]
+    
+    %matplotlib inline
+    fig = plt.figure()
+    plt.plot([lookBack, self.t],[0,nNeurons],'white')
+    for i in range(nNeurons):
+      result = np.array(np.where(SR[:,0] == i)).flatten()
+      for q in range(len(result)):
+        loc = result[q]
+        if (SR[loc,1]) >= lookBack:
+          plt.plot([SR[loc,1], SR[loc,1]],[i,i+.9],'k',linewidth=.5)
+    
+    plt.xlabel('time (ms)')
+    plt.ylabel('neuron #')
+    fig.set_size_inches(5, 4)
+    plt.show()
+
+    if purge:
+      self.spike_record = np.empty(shape=[1,2])
+    
+    return SR
+
+  def vect_kuramato(self,period=None,lookBack=None, r_cutoff = .3):
+    if period is None:
+      period=100/self.dt # 100 milliseconds.
+    if lookBack is None:
+      lookBack = self.t
+    lb = self.t - lookBack
+
+    # Spike record
+    SR = np.reshape(self.spike_record,newshape = [-1,2])
+    SR = np.delete(SR, 0, 0)
+    SRix = np.argmax(SR[:,1] >= lb)
+    SR = SR[SRix:,:]
+    SR = sorted(SR,key=lambda x: x[0])
+    wraps = lookBack/period
+
+    N = self.n_neurons
+  
+    theta = np.random.normal(size=[N,])
+    phasespace = np.linspace(0,2*np.pi,int(period+1))
+
+    held_neuron = np.min(SR[:][0])
+    phase_entries = []
+    phase_medians = np.zeros(shape=[N,])
+    for i in range(len(SR)):
+      ix = SR[i][0]
+      if ix != held_neuron:
+        x = np.cos(phase_entries)
+        y = np.sin(phase_entries)
+        mx = np.mean(x)
+        my = np.mean(y)
+        rho = np.sqrt(mx**2 + my**2)
+        phi = np.arctan2(my, mx)
+        if rho >= r_cutoff:
+          phase_medians[int(ix)] = phi
+        else:
+          phase_medians[int(ix)] = np.NaN
+        held_neuron = ix
+        phase_entries = []
+      else:
+        myarm = SR[i][1]-lb
+        while myarm > period:
+          myarm = myarm - period
+        myarm = phasespace[int(np.round(myarm))]
+        phase_entries.append(myarm)
+
+    phase_medians = phase_medians[~np.isnan(phase_medians)]
+
+    z = 1/N * np.sum(np.exp(1.0j * phase_medians))
+    r = np.abs(z)
+    return r
+
+  
+  def kuramato(self,period=None,lookBack=None):
+    if period is None:
+      period=100/self.dt # 100 milliseconds.
+    if lookBack is None:
+      lookBack = self.t
+    lb = self.t - lookBack
+
+    # Spike record
+    SR = np.reshape(self.spike_record,newshape = [-1,2])
+    SR = np.delete(SR, 0, 0)
+    SRix = np.argmax(SR[:,1] >= lb)
+    SR = SR[SRix:,:]
+    SR = sorted(SR,key=lambda x: x[0])
+    wraps = lookBack/period
+
+    N = self.n_neurons
+  
+    theta = np.random.normal(size=[N,])
+    phasespace = np.linspace(0,2*np.pi,int(period+1))
+
+    held_neuron = np.min(SR[:][0])
+    phase_entries = []
+    phase_medians = np.zeros(shape=[N,])
+    for i in range(len(SR)):
+      ix = SR[i][0]
+      if ix != held_neuron:
+
+        phase_medians[int(ix)] = circmean(phase_entries)
+        held_neuron = ix
+        phase_entries = []
+      else:
+        myarm = SR[i][1]-lb
+        while myarm > period:
+          myarm = myarm - period
+        myarm = phasespace[int(np.round(myarm))]
+        phase_entries.append(myarm)
+
+    phase_medians = phase_medians[~np.isnan(phase_medians)]
+
+    z = 1/N * np.sum(np.exp(1.0j * phase_medians))
+    r = np.abs(z)
+    return r
+
+
+  def simulate(self, timesteps = 1 ,I = None):
+    
+    n_time = int(timesteps/self.dt)
+
+    if I is None:
+      I = I = np.zeros(shape = [n_time,self.n_neurons])
+
+    # Varaible exporters:
+    t_holder = np.zeros([n_time,])
+    v_holder = np.zeros([n_time,self.n_neurons])
+    gsyn_holder = np.zeros([n_time,self.n_neurons])
+    pois_holder = np.zeros([n_time,self.n_neurons])
+    in_holder = np.zeros([n_time,self.n_neurons])
+    dW_holder = np.zeros([n_time,])
+
+    init_time = self.t/self.dt
+
+    # Time loop:
+    ii = 0
+    for t in range(n_time):
+
+      # Get poisson inputs:
+      self.simulate_poisson()
+
+      # Integrate inputs from noise and synapses
+      # Updating to exp decay...
+      # self.noise_g = (1-self.dt) * self.noise_g + self.g_poisson * self.poisson_input
+      self.noise_g = self.noise_g * np.exp(-self.dt/self.syn_tau) + self.g_poisson * self.poisson_input
+      # Updating to exp decay...
+      # self.syn_g = (1-self.dt) * self.syn_g + self.network_coupling * self.network_input
+      self.syn_g = self.syn_g * np.exp(-self.dt/self.syn_tau) + self.network_coupling * self.network_input + self.external_strength*I[ii][:]
+
+      # Input reset
+      self.network_input = np.zeros([self.n_neurons,])
+      self.w_flag = np.zeros([self.n_neurons,])
+      dW = 0
+
+      # Update V and Thr
+      self.v = self.v + self.dt * ( ( (self.v_rest - self.v) - (self.noise_g + self.syn_g) * self.v) / self.m_tau )
+      self.v_thr = self.v_thr + self.dt * (self.v_rf_thr - self.v_thr) / self.v_rf_tau
+
+      # Do spike calculations:
+      sp = (self.v >= self.v_thr) * (self.spike_flag == 0)
+      self.spike_flag[sp] = 1
+      self.w_flag[sp] = 1
+      self.t_spike1[sp] = self.t_spike2[sp]
+      self.t_spike2[sp] = self.t
+
+      f = (self.spike_flag == 1)
+      self.v[f] = self.v_spike
+      self.v_thr[f] = self.v_rf_spike
+
+      t_offset = self.t_spike2+self.spike_length <= self.t
+      self.spike_flag[t_offset * f] = 0
+      self.v[t_offset * f] = self.v_reset
+
+      s_difference = self.t-(self.t_spike2+self.synaptic_delay)
+      s_flag = 1.0 * (abs(s_difference) < .01)
+      self.network_input = np.matmul(s_flag.T, self.network_W * self.network_conn)
+
+      # STDP:
+      if self.w_flag.any():
+        for i in range(self.n_neurons):
+          if (self.w_flag[i] == 1):
+            self.spike_record = np.append(self.spike_record,np.array([i,self.t]))
+            for j in range(self.n_neurons):
+
+              # Check for last spike of pre-synaptic partners:
+              if self.network_conn[i][j] == 1:
+                
+                # TD       =   (post-synaptic spike - pre-synaptic spike (+) offset by delay)
+                temporal_diff = self.t_spike2[i] - self.t_spike2[j]   + self.synaptic_delay
+                if temporal_diff > 0:
+                  dW = dW + self.Delta_W_tau(temporal_diff,i,j)
+                else:
+                  temporal_diff = self.t_spike2[i] - self.t_spike1[j] + self.synaptic_delay
+                  dW = dW + self.Delta_W_tau(temporal_diff,i,j)
+
+              # Now inform post-synaptic parters about spike.
+              if self.network_conn[j][i] == 1: 
+                temporal_diff =  self.t_spike2[j] - self.t_spike2[i] + self.synaptic_delay
+                dW = dW + self.Delta_W_tau(temporal_diff,j,i)
+
+      # End of Epoch:
+      tix = int(self.t_itt-init_time)
+      t_holder[tix] = self.t
+      v_holder[:][tix] = self.v   
+      gsyn_holder[:][tix] = self.syn_g + self.noise_g
+      pois_holder[:][tix] = self.poisson_input
+      in_holder[:][tix] = self.network_input
+      dW_holder[tix] = dW
+
+      self.t_itt += 1
+      self.t += self.dt
+      ii += 1
+      
+    return v_holder, gsyn_holder, pois_holder, t_holder, in_holder, dW_holder
+ 
+
+# %%
+#@title Plotting functions
+
+figure_size = [10,8]
+
+def plot_structure(LIF, conn= False, conn_target = None):
+  if conn == True and conn_target is None:
+    conn_target = range(LIF.n_neurons)
+  fig = plt.figure()
+  ax = fig.add_subplot(projection='3d')
+  ax.scatter(LIF.x,LIF.y,LIF.z)
+  ax.set_xlabel('X')
+  ax.set_ylabel('Y')
+  ax.set_zlabel('Z')
+  ax.set_title('Location of cells')
+  plt.gcf().set_size_inches(figure_size[0], figure_size[1])
+  cm = plt.cm.get_cmap('viridis', LIF.n_neurons)
+
+  if conn:
+    C = LIF.network_conn
+    for i in range(LIF.n_neurons):
+      for j in range(LIF.n_neurons):
+        if C[i][j] > 0 and i in conn_target:
+          ax.plot([LIF.x[i], LIF.x[j]], [LIF.y[i], LIF.y[j]], [LIF.z[i], LIF.z[j]], color=cm(i),linewidth=.75)
+  plt.show()
+
+def plot_connectivity(LIF):
+  %matplotlib inline
+  fig = plt.figure()
+  ax = fig.add_subplot()
+  plt.imshow(LIF.network_conn,aspect='equal',interpolation='none')
+  ax.set_aspect('auto')
+  plt.ylabel('Neuron index')
+  plt.xlabel('Connectivity to other neurons')
+  plt.title('Connectivity map')
+  
+  plt.show()
+
+def plot_voltage(sim, n = 5):
+
+  [v,g,p,t,inp,dw] = sim
+  %matplotlib inline
+  fig = plt.figure()
+  for i in range(n):
+    plt.plot(t[:-1],v[:-1,i]-i*100)
+  plt.xlabel('time [ms]')
+  plt.ylabel('neural voltage, by index x 100')
+  plt.title('example voltages')
+  plt.gcf().set_size_inches(figure_size[0], figure_size[1])
+  plt.show()
+
+def plotter(LIF,time,pN = 5):
+  fig = plt.figure()
+  ax = fig.add_subplot(projection='3d')
+  ax.scatter(LIF.x,LIF.y,LIF.z)
+  ax.set_xlabel('X')
+  ax.set_ylabel('Y')
+  ax.set_zlabel('Z')
+  ax.set_title('Location of cells')
+  plt.show()
+
+  %matplotlib inline
+  fig = plt.figure()
+  ax = fig.add_subplot()
+  plt.imshow(LIF.network_conn,aspect='equal',interpolation='none')
+  ax.set_aspect('auto')
+  plt.ylabel('Neuron index')
+  plt.xlabel('Connectivity to other neurons')
+  plt.title('Connectivity map')
+  plt.show()
+  print(np.mean(LIF.network_conn.flatten()))
+
+  %matplotlib inline
+  fig = plt.figure()
+  ax = fig.add_subplot()
+  plt.imshow(LIF.network_W,aspect='equal',interpolation='none')
+  plt.colorbar()
+  ax.set_aspect('auto')
+  plt.ylabel('Neuron index')
+  plt.xlabel('Weight to other neurons')
+  plt.title('Weights pre-training')
+  plt.show()
+
+  W = np.copy(LIF.network_W)
+  Wf = W.flatten()
+  %matplotlib inline
+  fig = plt.figure()
+  plt.plot(np.sort(Wf[Wf>0]))
+  plt.xlabel('order of weights')
+  plt.ylabel('weight')
+  plt.title('Sorted weights pre-training')
+  plt.show()
+  print(np.mean(W[W > 0].flatten()))
+
+  h = LIF.simulate(timesteps = time)
+  [v,g,p,t,inp,dw] = h
+  W2 = LIF.network_W
+  
+  %matplotlib inline
+  fig = plt.figure()
+  ax = fig.add_subplot()
+  plt.imshow(W2,aspect='equal',interpolation='none')
+  plt.colorbar()
+  ax.set_aspect('auto')
+  plt.ylabel('Neuron index')
+  plt.xlabel('Weight to other neurons')
+  plt.title('Weights after-training')
+  plt.show()
+
+  %matplotlib inline
+  fig = plt.figure()
+  ax = fig.add_subplot()
+  plt.imshow((W2-W),aspect='equal',interpolation='none')
+  plt.colorbar()
+  ax.set_aspect('auto')
+  plt.ylabel('Neuron index')
+  plt.xlabel('Weight to other neurons')
+  plt.title('Change in Weights after-training')
+  plt.show()
+
+  print(np.mean(W2[W2 > 0].flatten()))
+  Wf2 = W2.flatten()
+  %matplotlib inline
+  fig = plt.figure()
+  plt.plot(np.sort(Wf[Wf>0]))
+  plt.plot(np.sort(Wf2[Wf>0]))
+  plt.xlabel('order of weights')
+  plt.ylabel('weight')
+  plt.show()
+
+  %matplotlib inline
+  fig = plt.figure()
+  for i in range(pN):
+    plt.plot(t,v[:,i]-i*100)
+  plt.xlabel('time [ms]')
+  plt.ylabel('neural voltage (offset by index)')
+  plt.title('example neural activity')
+  plt.show()
+
+  %matplotlib inline
+  fig = plt.figure()
+  for i in range(pN):
+    plt.plot(t,g[:,i]-i*50)
+  plt.xlabel('time [ms]')
+  plt.ylabel('syaptic current (offset by index)')
+  plt.title('example neural currents')
+  plt.show()
+
+  %matplotlib inline
+  fig = plt.figure()
+  for i in range(pN):
+    plt.plot(t,p[:,i]-i*1)
+  plt.xlabel('time [ms]')
+  plt.ylabel('poisson spikes (offset by index)')
+  plt.title('example external inputs')
+  plt.show()
+
+  %matplotlib inline
+  fig = plt.figure()
+  for i in range(2):
+    plt.plot(t,inp[:,i])
+  plt.xlabel('time [ms]')
+  plt.ylabel('poisson spikes (offset by index)')
+  plt.title('example internal inputs')
+  plt.show()
+
+  %matplotlib inline
+  fig = plt.figure()
+  plt.plot(t,dw)
+  plt.xlabel('time [ms]')
+  plt.ylabel('weight changes')
+  plt.title('dW')
+  plt.show()
+
+# %% [markdown]
+# # Results
+
+# %% [markdown]
+# ## Basic Network Features and Model Functions
+
+# %% [markdown]
+# To begin with, model construction comes from instantiation of the class defined above [#LIF Model]. The size of the network, in terms of number of neurons *and* the physical dimensions of the structure can be defined on initialization. You may plot the cell locations with plot_structure(), and you can also show connectivity on this map by setting the parameter conn to True. Additionally, you can limit the connectivities shown by setting conn_target to a vector which contains the indexes of the cells that will have their connectivity plotted.
+# 
+# However, note that the shown dimension aspect ratios are not correct, because for whatever reason Matplotlib does not allow this.
+
+# %%
+LIF = LIF_Network(n_neurons=20, dimensions= [[0,100],[0,100],[0,50]])
+LIF.p_conn = .4
+LIF.random_conn()
+plot_structure(LIF, conn = False)
+plot_structure(LIF, conn = True, conn_target = [2])
+
+# %% [markdown]
+# The connectivity can either be random, or determined by a function that is more likely to connect locally and less likely to connect distally, which is an inherent function of the LIF class named structured_conn(). 
+# 
+
+# %%
+np.random.seed(6)
+LIF = LIF_Network(n_neurons=150, dimensions= [[0,100],[0,1],[0,1]])
+LIF.p_conn = .1
+d = LIF.structured_conn(LIF)
+plot_structure(LIF, conn = True, conn_target = [0, 75])
+
+
+data = d.flatten()
+data = data[~np.isnan(data)]
+
+print("The observed connectivity probability is: " + str(len(data)/(LIF.n_neurons**2)))
+
+fig, ax = plt.subplots(figsize =(10, 7))
+binwidth = 5
+ax.hist(d.flatten(), bins=range(int(min(data)), int(max(data) + binwidth), binwidth), density= True)
+plt.xlabel('connection distance')
+plt.ylabel('probability of connections')
+plt.title('example structured connectivity histogram')
+plt.gcf().set_size_inches(figure_size[0], figure_size[1])
+plt.show()
+
+# %% [markdown]
+# A matrix description of the connectivity can be plotted by calling plot_connectivity().
+
+# %%
+plot_connectivity(LIF)
+
+# %% [markdown]
+# The simulation can run for an alloted period of time using LIF.simulate(). Here, we run the simulation for 100 milliseconds and plot the voltages for 10 of the neurons with plot_voltage(). Not that if you repeat this process, that time continues from the end of the last simulation.
+
+# %%
+LIF = LIF_Network(n_neurons=150, dimensions= [[0,100],[0,1],[0,1]])
+LIF.p_conn = .5
+
+simulation_results = LIF.simulate(timesteps = 100)
+plot_voltage(simulation_results, n = 10)
+
+simulation_results = LIF.simulate(timesteps = 150)
+plot_voltage(simulation_results, n = 10)
+
+# %% [markdown]
+# You can also view the spike train by calling the internal function LIF.spikeTrain().
+
+# %%
+h = LIF.simulate(timesteps = 2000)
+st1 = LIF.spikeTrain(lookBack=2000,nNeurons=1)
+st2 = LIF.spikeTrain(lookBack=2000,nNeurons=10)
+
+print(st2)
+
+# %% [markdown]
+# You can observe the degree of synchrony in the network using Kuramato's method, which is called with the internal class function kuramato(). Below shows the change in synchrony as the network weights increase across 5000 milliseconds. The network is completely disconnected at the 5000 ms mark and the order paramter decreases afterwards as a result. The degree of synchrony can be observed using the Kuramato order metric, but it can also be seen in the spike train for visualization reference and validation.
+
+# %%
+np.random.seed(1)
+LIF = LIF_Network(n_neurons= 200)
+LIF.p_conn = .1
+LIF.random_conn()
+
+t = []
+o = []
+ov = []
+splits = 5
+trials = 20*splits
+LB = 1000
+LIF.simulate(timesteps = LB)
+print("Starting...")
+print("Running Synchrony...")
+print(" ",end = "")
+print("_"*int(-1+trials/splits))
+print("[", end="")
+for i in range(trials):
+  h = LIF.simulate(timesteps = 200/splits)
+  ordv = LIF.vect_kuramato(period = 200, lookBack = LB, r_cutoff = .1)
+  ord = LIF.kuramato(period = 200, lookBack = LB)
+  t.append(LIF.t)
+  o.append(ord)
+  ov.append(ordv)
+  if i%splits == 0 and i > 1:
+    print("█",end="")
+print("] Done!")
+
+print("")
+print("Phase ended at time: " + str(LIF.t) + " ms.")
+
+# Reset network to 0 connectivity:
+LIF.network_conn = np.zeros([LIF.n_neurons,LIF.n_neurons])  
+LIF.g_poisson = 3
+trials = 10*splits
+print("Running desynchrony... ")
+print(" ",end = "")
+print("_"*int(-1+trials/splits))
+print("[", end="")
+for i in range(trials):
+  h = LIF.simulate(timesteps = 200/splits)
+  ordv = LIF.vect_kuramato(period = 200, lookBack = LB, r_cutoff = .1)
+  ord = LIF.kuramato(period = 200, lookBack = LB)
+  t.append(LIF.t)
+  o.append(ord)
+  ov.append(ordv)
+  if i%splits == 0 and i > 1:
+    print("█",end="")
+print("] Done!")
+print("Phase ended at time: " + str(LIF.t) + " ms.")
+
+%matplotlib inline
+fig = plt.figure()
+
+plt.xlabel('time [ms]')
+plt.ylabel('Kuramato order')
+plt.plot(t,o)
+plt.plot(t,ov,'red')
+fig.set_size_inches(5, 4)
+plt.show()
+
+rr = LIF.spikeTrain(nNeurons=40,purge=False)
+
+# %% [markdown]
+# We can view our STDP function by running assaySTDP() on the LIF class:
+
+# %%
+LIF = LIF_Network(n_neurons=10)
+LIF.assaySTDP()
+
+# %% [markdown]
+# Let's examine a very small network so we can observe the STDP events and line them up with spiking events. This will help us verify that the learning rule is working as we expect it to:
+
+# %%
+LIF = LIF_Network(n_neurons=10)
+LIF.v = LIF.v * 0 - 50
+LIF.v_thr[0] = -70
+LIF.v_rf_thr[0] = -65
+
+LIF.network_conn = LIF.network_conn * 0
+LIF.network_W = LIF.network_W * 0
+for i in range(1,4):
+  LIF.network_conn[i-1][i] = 1
+  LIF.network_W[i-1][i] = .5
+
+LIF.g_poisson = 0
+print(LIF)
+
+plotter(LIF,100,pN = 4)
+plotter(LIF,100,pN = 4)
+
+# %% [markdown]
+# Here, because we 'purged' the spike record, everything before the epoch has been forgotten. So be careful! The spike record is memory intensive, so it should be purged periodically, but you should save it somewhere. The function returns the spike record, as you can see.
+
+# %% [markdown]
+# Now let's see if we can observe synchrony in the spikes:
+
+# %%
+LIF = LIF_Network(n_neurons=300)
+
+h = LIF.simulate(timesteps = 2000)
+[v,g,p,t,inp,dw] = h
+h2 = LIF.spikeTrain(lookBack=1000,nNeurons=100,purge=False)
+
+for i in range(15):
+  h = LIF.simulate(timesteps = 2000)
+  [v,g,p,t,inp,dw] = h
+  h2 = LIF.spikeTrain(lookBack=1000,nNeurons=100,purge=False)
+  LIF.kuramato()
+  
+
+# %% [markdown]
+# Great!
+
+# %% [markdown]
+# That seems reasonable. Now lets see what happens when when the first neuron is weakly connected to all other neurons. It should generate some negative plasticity because it is constatly firing without causing spikes in the post-synaptic cells:
+
+# %%
+LIF = LIF_Network(n_neurons=10)
+
+LIF.v = LIF.v * 0 - 50
+LIF.v_thr[0] = -70
+LIF.v_rf_thr[0] = -65
+
+LIF.network_conn = LIF.network_conn * 0
+LIF.network_W = LIF.network_W * 0
+for i in range(1,10):
+  LIF.network_conn[i-1][i] = 1
+  LIF.network_conn[0][i] = 1
+  LIF.network_W[i-1][i] = .5
+  LIF.network_W[0][i] = .05
+LIF.network_W[0][1] = .5 
+LIF.network_W[0][0] = 0
+LIF.g_poisson = 0
+print(LIF)
+
+plotter(LIF,1000)
+
+# %% [markdown]
+# We see a train of negative weight updates alligned with the firing of cell one. Let's now examine how Beta affects the learning curve, and then try out a LTP biased system vs a LTP biased system:
+
+# %%
+LIF = LIF_Network(n_neurons=10)
+LIF.assaySTDP()
+
+LIF = LIF_Network(n_neurons=10)
+LIF.stdp_beta = 10
+LIF.assaySTDP()
+
+LIF = LIF_Network(n_neurons=10)
+LIF.stdp_beta = .5
+LIF.assaySTDP()
+
+
+# %% [markdown]
+# We can see that beta affects the magnitude of LTP, so let's see what happens when beta is small:
+
+# %%
+LIF = LIF_Network(n_neurons=10)
+LIF.stdp_beta = .5
+
+LIF.v = LIF.v * 0 - 50
+LIF.v_thr[0] = -70
+LIF.v_rf_thr[0] = -65
+
+LIF.network_conn = LIF.network_conn * 0
+LIF.network_W = LIF.network_W * 0
+for i in range(1,10):
+  LIF.network_conn[i-1][i] = 1
+  LIF.network_conn[0][i] = 1
+  LIF.network_W[i-1][i] = .5
+  LIF.network_W[0][i] = .05
+  
+LIF.network_W[0][1] = .5 
+LIF.network_W[0][0] = 0
+LIF.g_poisson = 0
+
+plotter(LIF,1000)
+
+# %% [markdown]
+# Even though cell one is not contributing to firing in cells 2-10, it still undergoes LTP because of the learning bias.
+# 
+# Now let's see what happens when beta is large, meaning that LTD is favored:
+
+# %%
+LIF = LIF_Network(n_neurons=10)
+LIF.stdp_beta = 10
+
+LIF.v = LIF.v * 0 - 50
+LIF.v_thr[0] = -70
+LIF.v_rf_thr[0] = -65
+
+LIF.network_conn = LIF.network_conn * 0
+LIF.network_W = LIF.network_W * 0
+for i in range(1,10):
+  LIF.network_conn[i-1][i] = 1
+  LIF.network_conn[0][i] = 1
+  LIF.network_W[i-1][i] = .5
+  LIF.network_W[0][i] = .05
+  
+LIF.network_W[0][1] = .5 
+LIF.network_W[0][0] = 0
+LIF.g_poisson = 0
+
+plotter(LIF,1000)
+
+# %% [markdown]
+# Looks like we see a massive decrease in weights across the board, as expected.
+
+# %% [markdown]
+# 
+# Let's now use a more realistic network and run it for 20 seconds to see if we see an overall increase in weights.
+
+# %%
+LIF = LIF_Network(n_neurons= 100)
+plotter(LIF,20000)
+
+# %% [markdown]
+# Seems like there is an overall trend towards increased weights between connected neurons, though some weakly connected neurons seem to be eliminating their weights too.
+
+# %% [markdown]
+# ## Bistability of neural weights and synchrony
+
+# %% [markdown]
+# This model shows the different results for the weights and the orders of the neurons, both in graph and matrix form. The graphs show for each pixel fo the matrix and the behavior of the network over time. The matrix shows the results after a set period of time. Each pixel represents a network being stimulated with a different frequency and number of fingers (stimulation nodes). The colormap shows either the weights or the order of the neurons in each network.
+
+# %%
+#@title Plotting function 2
+def plotter2(LIF,time,I,pN = 5):
+
+  LIF.simulate(timesteps = time,I=I)
+  #[v,g,p,t,inp,dw] = h
+  W2 = LIF.network_W
+
+  %matplotlib inline
+  fig = plt.figure()
+  #for i in range(pN):
+    #plt.plot(t,g[:,i]-i*50)
+  #plt.xlabel('time [ms]')
+  #plt.ylabel('syaptic current (offset by index)')
+  #plt.title('example neural currents')
+  #plt.show()
+
+# %% [markdown]
+# The following cell shows the results of the weight after every 2 seconds. The number of fingers is 10 and the frequency is 50. These parameters can be changed to see different results.
+# 
+# The results of this cell as it is are that the weights and the order increase overall logarthimically.
+
+# %%
+x = []
+y = []
+g=[]
+z=[]
+o=0
+
+nof = 10
+n = 200
+d=[]
+LIF = LIF_Network(n_neurons=n)
+dt = LIF.dt
+
+T = 10000 # time waiting after stimulation before measuring, in ms
+I = np.zeros(shape = [T,n])
+# add impulses to the outside actvity
+stim = np.zeros([T,nof]) 
+ConnStimNetwork = np.zeros([nof,n])
+probability = 0.2
+
+for c in range(n):
+  for c2 in range(nof):
+    Q = np.random.randint(0, high=99)
+    if Q/100 < probability:
+      ConnStimNetwork[c2,c] = 1
+
+stimorder = np.arange(nof)
+np.random.shuffle(stimorder)
+
+freq = 50
+num = int((T/freq)/dt)
+stim_length = 0 # length of stimulation, in ms
+
+for j in range(0,nof):
+  for i in range(j*stim_length,(j+1)*stim_length,num): 
+    if i<T:
+      stim[i][stimorder[j]] = 1 
+      I[i] [ConnStimNetwork[j,:]>0] = 1
+
+%matplotlib inline
+fig = plt.figure()
+
+for i in range(240):
+    W1 = np.copy(LIF.network_W)
+    mean_W1 = np.mean(W1[W1 > 0].flatten())
+    plotter2(LIF,T*dt, I, pN = 5)
+    W2 = np.copy(LIF.network_W)
+    mean_W2 = np.mean(W2[W1 > 0].flatten())
+    mean_W3 = mean_W2-mean_W1
+    d.append(mean_W2)
+    order = LIF.kuramato(period = 200, lookBack = 1000)
+    g.append(order)
+
+    #print(o,  mean_W3)
+    h=sum(d) / len(d)
+    gh=sum(g) / len(g)
+    x.append(o)
+    y.append(h)
+    z.append(gh)
+    print(o)
+    plt.plot(x,z)
+    plt.show()
+    o=o+1
+
+# %%
+
+
+# %% [markdown]
+# This below cell runs when the frequency is 25 and the number of nodes is 45. It shows what the different trends in weights are at different times of waiting after the stimulation time.
+# 
+# The result is that the weights go up.:
+
+# %%
+o = 25
+nof = 45
+n = 200
+d=[]
+c=[]
+dt = LIF.dt
+T = 10000
+I = np.zeros(shape = [T,n])
+# add impulses to the outside actvity
+stim = np.zeros([T,nof]) 
+ConnStimNetwork = np.zeros([nof,n])
+probability = 0.2
+for c in range(n):
+    for c2 in range(nof):
+        Q = np.random.randint(0, high=99)
+        if Q/100 < probability:
+            ConnStimNetwork[c2,c] = 1
+stimorder = np.arange(nof)
+np.random.shuffle(stimorder)
+freq = o
+num = int((T/freq)/dt)
+stim_length = 50000
+for j in range(0,nof):
+    for i in range(j*stim_length,(j+1)*stim_length,num): 
+        if i<T:
+            stim[i][stimorder[j]] = 1 
+            I[i] [ConnStimNetwork[j,:]>0] = 1
+for T in range(2000,20000,2000):
+    fig = plt.figure()
+    fig.set_size_inches(5, 4)
+    ax = fig.add_subplot()
+    for tr in range(1):
+        LIF = LIF_Network(n_neurons=n)
+        c=[]
+        f=[]
+        for simcount in range(10):
+            W1 = np.copy(LIF.network_W)
+            mean_W1 = np.mean(W1[W1 > 0].flatten())
+            plotter2(LIF,T*dt, I, pN = 5)
+            W2 = np.copy(LIF.network_W)
+            mean_W2 = np.mean(W2[W1 > 0].flatten())
+            c.append(mean_W2)
+            f.append(simcount)
+        plt.plot(f,c)
+        plt.title("T = " + str(T))
+        plt.show()
+
+# %% [markdown]
+# This below cell runs when the frequency is 25 and the number of nodes is 45. It shows what the different trends in weights are at different times of waiting after the stimulation time.
+# 
+# The result is that the weights go down.
+
+# %%
+o = 25
+nof = 45
+n = 200
+d=[]
+c=[]
+dt = LIF.dt
+T = 10000
+I = np.zeros(shape = [T,n])
+# add impulses to the outside actvity
+stim = np.zeros([T,nof]) 
+ConnStimNetwork = np.zeros([nof,n])
+probability = 0.2
+for c in range(n):
+    for c2 in range(nof):
+        Q = np.random.randint(0, high=99)
+        if Q/100 < probability:
+            ConnStimNetwork[c2,c] = 1
+stimorder = np.arange(nof)
+np.random.shuffle(stimorder)
+freq = o
+num = int((T/freq)/dt)
+stim_length = int(T/nof)
+for j in range(0,nof):
+    for i in range(j*stim_length,(j+1)*stim_length,num): 
+        if i<T:
+            stim[i][stimorder[j]] = 1 
+            I[i] [ConnStimNetwork[j,:]>0] = 1
+for T in range(2000,20000,2000):
+    fig = plt.figure()
+    fig.set_size_inches(5, 4)
+    ax = fig.add_subplot()
+    for tr in range(1):
+        LIF = LIF_Network(n_neurons=n)
+        c=[]
+        f=[]
+        for simcount in range(10):
+            W1 = np.copy(LIF.network_W)
+            mean_W1 = np.mean(W1[W1 > 0].flatten())
+            plotter2(LIF,T*dt, I, pN = 5)
+            W2 = np.copy(LIF.network_W)
+            mean_W2 = np.mean(W2[W1 > 0].flatten())
+            c.append(mean_W2)
+            f.append(simcount)
+        plt.plot(f,c)
+        plt.title("T = " + str(T))
+        plt.show()
+
+# %% [markdown]
+# This below cell is running the stimulation to produce a matrix of weights after the stimulation. The time waiting after the stimulatino is 10 seconds, while the stimulation length itself is 1 second. The number of neurons is 200. 
+# 
+# From this cell, we get a graph showing that the weights of the neurons decreases at frequencies between 10 and 70 Hz, while it increases above 70-80 Hz.
+
+# %%
+from datetime import datetime
+LIF = LIF_Network(n_neurons=2)
+# datetime object containing current date and time
+now = datetime.now()
+print("now =", now) 
+results_matrix = np.zeros([10,25])
+ii = -1
+jj = -1
+hj=0
+# Experiment parameters
+T = 100000
+stim_length = 10000
+n = 200
+dt = LIF.dt
+probability = 0.2
+print("starting...")
+for k in range(1,51,5):
+    ii = ii+1
+    jj=-1
+    nof = k
+    print("trial " + str(ii) + " of " + str(60/2))
+    for o in range(1, 251, 10):
+        jj = jj+1
+        meanW=[]
+        for i in range(3):
+            LIF = LIF_Network(n_neurons=n)
+            I = np.zeros(shape = [T,n])
+            # add impulses to the outside actvity
+            stim = np.zeros([T,nof]) 
+            ConnStimNetwork = np.zeros([nof,n])
+            for c in range(n):
+                for c2 in range(nof):
+                    Q = np.random.randint(0, high=99)
+                    if Q/100 < probability:
+                        ConnStimNetwork[c2,c] = 1
+            stimorder = np.arange(nof)
+            np.random.shuffle(stimorder)
+            freq = o
+            num = int(1000/freq/dt)
+            held_i = 0    
+            while held_i<T:
+                for j in range(nof):
+                    for i in range(0,stim_length,num): 
+                        if i+held_i<T:
+                            stim[i+held_i][stimorder[j]] = 1 
+                            I[i+held_i] [ConnStimNetwork[j,:]>0] = 1              
+                    held_i = held_i + stim_length
+            W1 = np.copy(LIF.network_W)
+            mean_W1 = np.mean(W1[W1 > 0].flatten())
+            plotter2(LIF,T*dt, I, pN = 5)
+            W2 = np.copy(LIF.network_W)
+            mean_W2 = np.mean(W2[W1 > 0].flatten())
+            meanW.append(mean_W2)
+            print("elapsed time for trial was: ", datetime.now()-now)
+            now = datetime.now()
+            print("frequency: " + str(o) +" produced mean weight of: " + str(mean_W2))
+        results_matrix[ii][jj]=np.mean(meanW)
+        %matplotlib inline
+        fig = plt.figure()
+        fig.set_size_inches(5, 4)
+        ax = fig.add_subplot()
+        plt.imshow(np.flipud(results_matrix),aspect='equal',interpolation='none', vmin=np.min(results_matrix[np.nonzero(results_matrix)]), vmax=np.max(results_matrix[np.nonzero(results_matrix)]), cmap='jet')
+    
+        plt.colorbar()
+        ax.set_aspect('auto')
+        plt.ylabel('number of nodes')
+        plt.xlabel('frequency')
+        plt.show()
+
+# %% [markdown]
+# This below cell is running the stimulation to produce a matrix of the order of the neuron system after the stimulation. The time waiting after the stimulatino is 15 seconds, while the stimulation length itself is 1 second. The number of neurons is 200. 
+# 
+# From this cell, we get a graph showing that the order of the neurons approximately decreases at frequencies between 10 and 70 Hz, while it increases above 70-80 Hz, similar to the weights. However, it is slightly more random than the weights.
+
+# %%
+from datetime import datetime
+LIF = LIF_Network(n_neurons=2)
+# datetime object containing current date and time
+now = datetime.now()
+print("now =", now) 
+results_matrix = np.zeros([17,20])
+ii = -1
+jj = -1
+hj=0
+# Experiment parameters
+T = 150000
+stim_length = 10000
+n = 200
+dt = LIF.dt
+probability = 0.2
+print("starting...")
+for k in range(1,51,3):
+    ii = ii+1
+    jj=-1
+    nof = k
+    print("trial " + str(ii) + " of " + str(60/2))
+    for o in range(1, 201, 10):
+        jj = jj+1
+        meanW=[]
+        for i in range(5):
+            LIF = LIF_Network(n_neurons=n)
+            I = np.zeros(shape = [T,n])
+            # add impulses to the outside actvity
+            stim = np.zeros([T,nof]) 
+            ConnStimNetwork = np.zeros([nof,n])
+            for c in range(n):
+                for c2 in range(nof):
+                    Q = np.random.randint(0, high=99)
+                    if Q/100 < probability:
+                        ConnStimNetwork[c2,c] = 1
+            stimorder = np.arange(nof)
+            np.random.shuffle(stimorder)
+            freq = o
+            num = int(1000/freq/dt)
+            held_i = 0    
+            while held_i<T:
+                for j in range(nof):
+                    for i in range(0,stim_length,num): 
+                        if i+held_i<T:
+                            stim[i+held_i][stimorder[j]] = 1 
+                            I[i+held_i] [ConnStimNetwork[j,:]>0] = 1              
+                    held_i = held_i + stim_length
+            W1 = np.copy(LIF.network_W)
+            mean_W1 = np.mean(W1[W1 > 0].flatten())
+            
+            plotter2(LIF,T*dt, I, pN = 5)
+            order = LIF.kuramato(period = 200, lookBack = 1000)
+            W2 = np.copy(LIF.network_W)
+            mean_W2 = np.mean(W2[W1 > 0].flatten())
+            meanW.append(mean_W2)
+            print("elapsed time for trial was: ", datetime.now()-now)
+            now = datetime.now()
+            print("frequency: " + str(o) +" produced mean weight of: " + str(order))
+        results_matrix[ii][jj]=np.mean(order)
+        %matplotlib inline
+        fig = plt.figure()
+        fig.set_size_inches(5, 4)
+        ax = fig.add_subplot()
+        plt.imshow(np.flipud(results_matrix),aspect='equal',interpolation='none', vmin=np.min(results_matrix[np.nonzero(results_matrix)]), vmax=np.max(results_matrix[np.nonzero(results_matrix)]), cmap='jet')
+        plt.colorbar()
+        ax.set_aspect('auto')
+        plt.ylabel('number of nodes')
+        plt.xlabel('frequency')
+        plt.show()
+
+# %% [markdown]
+# ## Effects of stimulation frequency and number of stimulation sites on weights and synchrony.
+# 
+
+# %% [markdown]
+# These next two cells produce matrixes with the frequency vs. number of nodes, with a colorbar representing the weights of the neurons in the first cell and the synchrony of the neurons in the second cell. They use the new version of the connectivity model, which makes the connectivity dependent on the distance between neurons.
+
+# %%
+from datetime import datetime
+LIF = LIF_Network(n_neurons=200)
+LIF.structured_conn(LIF)
+# datetime object containing current date and time
+now = datetime.now()
+print("now =", now) 
+results_matrix = np.zeros([10,25])
+ii = -1
+jj = -1
+hj=0
+# Experiment parameters
+T = 100000
+stim_length = 10000
+n = 200
+dt = LIF.dt
+probability = 0.2
+print("starting...")
+for k in range(1,51,5):
+    ii = ii+1
+    jj=-1
+    nof = k
+    print("trial " + str(ii) + " of " + str(60/2))
+    for o in range(1, 251, 10):
+        jj = jj+1
+        meanW=[]
+        for i in range(3):
+            LIF = LIF_Network(n_neurons=n)
+            LIF.structured_conn(LIF)
+            I = np.zeros(shape = [T,n])
+            # add impulses to the outside actvity
+            stim = np.zeros([T,nof]) 
+            ConnStimNetwork = np.zeros([nof,n])
+            for c in range(n):
+                for c2 in range(nof):
+                    Q = np.random.randint(0, high=99)
+                    if Q/100 < probability:
+                        ConnStimNetwork[c2,c] = 1
+            stimorder = np.arange(nof)
+            np.random.shuffle(stimorder)
+            freq = o
+            num = int(1000/freq/dt)
+            held_i = 0    
+            while held_i<T:
+                for j in range(nof):
+                    for i in range(0,stim_length,num): 
+                        if i+held_i<T:
+                            stim[i+held_i][stimorder[j]] = 1 
+                            I[i+held_i] [ConnStimNetwork[j,:]>0] = 1              
+                    held_i = held_i + stim_length
+            W1 = np.copy(LIF.network_W)
+            mean_W1 = np.mean(W1[W1 > 0].flatten())
+            plotter2(LIF,T*dt, I, pN = 5)
+            W2 = np.copy(LIF.network_W)
+            mean_W2 = np.mean(W2[W1 > 0].flatten())
+            meanW.append(mean_W2)
+            print("elapsed time for trial was: ", datetime.now()-now)
+            now = datetime.now()
+            print("frequency: " + str(o) +" produced mean weight of: " + str(mean_W2))
+        results_matrix[ii][jj]=np.mean(meanW)
+        %matplotlib inline
+        fig = plt.figure()
+        fig.set_size_inches(5, 4)
+        ax = fig.add_subplot()
+        plt.imshow(np.flipud(results_matrix),aspect='equal',interpolation='none', vmin=np.min(results_matrix[np.nonzero(results_matrix)]), vmax=np.max(results_matrix[np.nonzero(results_matrix)]), cmap='jet')
+    
+        plt.colorbar()
+        ax.set_aspect('auto')
+        plt.ylabel('number of nodes')
+        plt.xlabel('frequency')
+        plt.show()
+
+# %%
+from datetime import datetime
+LIF = LIF_Network(n_neurons=200)
+LIF.structured_conn(LIF)
+# datetime object containing current date and time
+now = datetime.now()
+print("now =", now) 
+results_matrix = np.zeros([17,20])
+ii = -1
+jj = -1
+hj=0
+# Experiment parameters
+T = 150000
+stim_length = 10000
+n = 200
+dt = LIF.dt
+probability = 0.2
+print("starting...")
+for k in range(1,51,3):
+    ii = ii+1
+    jj=-1
+    nof = k
+    print("trial " + str(ii) + " of " + str(60/2))
+    for o in range(1, 201, 10):
+        jj = jj+1
+        meanW=[]
+        for i in range(5):
+            LIF = LIF_Network(n_neurons=n)
+            LIF.structured_conn(LIF)
+            I = np.zeros(shape = [T,n])
+            # add impulses to the outside actvity
+            stim = np.zeros([T,nof]) 
+            ConnStimNetwork = np.zeros([nof,n])
+            for c in range(n):
+                for c2 in range(nof):
+                    Q = np.random.randint(0, high=99)
+                    if Q/100 < probability:
+                        ConnStimNetwork[c2,c] = 1
+            stimorder = np.arange(nof)
+            np.random.shuffle(stimorder)
+            freq = o
+            num = int(1000/freq/dt)
+            held_i = 0    
+            while held_i<T:
+                for j in range(nof):
+                    for i in range(0,stim_length,num): 
+                        if i+held_i<T:
+                            stim[i+held_i][stimorder[j]] = 1 
+                            I[i+held_i] [ConnStimNetwork[j,:]>0] = 1              
+                    held_i = held_i + stim_length
+            W1 = np.copy(LIF.network_W)
+            mean_W1 = np.mean(W1[W1 > 0].flatten())
+            
+            plotter2(LIF,T*dt, I, pN = 5)
+            order = LIF.kuramato(period = 200, lookBack = 1000)
+            W2 = np.copy(LIF.network_W)
+            mean_W2 = np.mean(W2[W1 > 0].flatten())
+            meanW.append(mean_W2)
+            print("elapsed time for trial was: ", datetime.now()-now)
+            now = datetime.now()
+            print("frequency: " + str(o) +" produced mean weight of: " + str(order))
+        results_matrix[ii][jj]=np.mean(order)
+        %matplotlib inline
+        fig = plt.figure()
+        fig.set_size_inches(5, 4)
+        ax = fig.add_subplot()
+        plt.imshow(np.flipud(results_matrix),aspect='equal',interpolation='none', vmin=np.min(results_matrix[np.nonzero(results_matrix)]), vmax=np.max(results_matrix[np.nonzero(results_matrix)]), cmap='jet')
+        plt.colorbar()
+        ax.set_aspect('auto')
+        plt.ylabel('number of nodes')
+        plt.xlabel('frequency')
+        plt.show()
+
+# %% [markdown]
+# ## Reinforcement Learning Test Book
+# 
+
+# %%
+n = 100
+LIF = LIF_Network(n_neurons=n)
+LIF.structured_conn(LIF)
+nof = 10
+
+probability = 0.2
+
+ConnStimNetwork = np.zeros([nof,n])
+for c in range(n):
+    for c2 in range(nof):
+        Q = np.random.randint(0, high=99)
+        if Q/100 < probability:
+            ConnStimNetwork[c2,c] = 1
+
+# %%
+class StimulusInput:
+  def __init__(self):
+    self.name = "Stimulus Input"
+    self.n_states = 11  # Lets start with 11 stats,range(0,.1,1.1) kuramato orders
+    self.n_actions = 5*5 # Lets have 10 frequencies and 10 sites
+    self.init_state = 0
+
+  def get_outcome(self, state, action, LIF, ConnStimNetwork):
+    reward = 0
+    next_state = 0
+
+    #basically we want the agent to pick a stimulation based on the current state.
+    # To get the outcome lets run the simulation and get the order...
+    # Let's take MAtteo's work as the baseline experiment:
+    dt = LIF.dt
+    
+    T = int(50000/10) # This is 100 seconds, I divided it by 10 because the stimorder has nof actions in it (10).
+    stim_length = 50000
+    
+    n = LIF.n_neurons
+    I = np.zeros(shape = [int(T/dt),n])
+    Wpre = np.copy(LIF.network_W) # Starting weights.
+
+    freq = np.floor(action/10) * 10 + 10
+    stimorder = action%10
+    num = int(1000/freq/dt)
+    held_i = 0    
+    
+    while held_i<T/dt:
+        for i in range(0,stim_length,num): 
+            if i+held_i<T/dt:                
+                I[i+held_i][ConnStimNetwork[stimorder,:]>0] = 1      
+        held_i = held_i + stim_length
+
+    LIF.simulate(timesteps = T,I=I)
+    LIF.simulate(timesteps = 2000)
+    Wpost = np.copy(LIF.network_W) # Starting weights.
+    ord = LIF.kuramato(period = 250, lookBack = 2000)
+
+    next_state = np.round(ord*10)
+    reward = 1-ord
+    return int(next_state) if next_state is not None else None, reward
+
+  def get_all_outcomes(self):
+    outcomes = {}
+    for state in range(self.n_states):
+      for action in range(self.n_actions):
+        next_state, reward = self.get_outcome(state, action)
+        outcomes[state, action] = [(1, next_state, reward)]
+    return outcomes
+
+
+# %%
+class LearningWorld:
+  def __init__(self):
+    self.name = "Stimulus Input"
+    self.n_states = 1  # Lets start with 11 stats,range(0,.1,1.1) kuramato orders
+    self.n_actions = 4 # Lets have 10 frequencies and 10 sites
+    self.init_state = 0
+
+  def get_outcome(self, state, action, LIF, ConnStimNetwork):
+    pre_w = np.mean(LIF.network_W.flatten())
+    if(action==0):
+        LIF.network_W = LIF.network_W + 0.03
+    if(action==1):
+        LIF.network_W = LIF.network_W
+    if(action==2):
+        LIF.network_W = LIF.network_W - 0.015
+    if(action==3):
+        LIF.network_W = LIF.network_W - 0.06
+
+    next_state = 0
+    reward = pre_w - np.mean(LIF.network_W.flatten())
+    return int(next_state) if next_state is not None else None, reward
+
+  def get_all_outcomes(self):
+    outcomes = {}
+    for state in range(self.n_states):
+      for action in range(self.n_actions):
+        next_state, reward = self.get_outcome(state, action)
+        outcomes[state, action] = [(1, next_state, reward)]
+    return outcomes
+
+
+# %%
+#### First let's get the network oversynced:
+n =100
+LIF = LIF_Network(n_neurons=n)
+nof = 10
+
+probability = 0.2
+
+ConnStimNetwork = np.zeros([nof,n])
+for c in range(n):
+    for c2 in range(nof):
+        Q = np.random.randint(0, high=99)
+        if Q/100 < probability:
+            ConnStimNetwork[c2,c] = 1
+
+
+for i in range(6):
+  LIF.simulate(timesteps = 12000)
+  ord = LIF.kuramato(period = 250, lookBack = int(2000))
+  x = LIF.spikeTrain(lookBack = int(12000), nNeurons=10)
+  print("Pre RL training step " + str(i+1) + "...")
+  print("Time:" + str(LIF.t))
+  print("Order:" + str(ord))
+
+
+
+# %%
+# now lets see what a random strategy does
+LIF.external_strength = 400/25
+Stim = StimulusInput()
+a = 1
+intermediates = 25
+aholder = []
+tholder = []
+for i in range(10):
+    action = np.random.randint(nof)
+    a = Stim.get_outcome(a,action,LIF,ConnStimNetwork)
+    ord = LIF.kuramato(period = 250, lookBack = int(2000))
+    x = LIF.spikeTrain(lookBack = int(12000), nNeurons=10)
+    print("Round " + str(i+1))
+    print("Time:" + str(LIF.t))
+    print("State:" + str(a))
+    print("Order:" + str(ord))
+    aholder.append(ord)
+    tholder.append(LIF.t)
+    for j in range(intermediates):
+        LIF.simulate(timesteps = 2000)
+        ord = LIF.kuramato(period = 250, lookBack = int(2000))
+        aholder.append(ord)
+        tholder.append(LIF.t)
+        
+for j in range(intermediates):
+    LIF.simulate(timesteps = 2000)
+    ord = LIF.kuramato(period = 250, lookBack = int(2000))
+    aholder.append(ord)   
+    tholder.append(LIF.t)
+
+# %%
+# now we can plot the effect and the recovery in terms of order:
+fig = plt.figure()
+plt.xlabel('epochs')
+plt.ylabel('Kuramato order')
+plt.plot(tholder,aholder)
+aa = np.array(aholder)
+tt = np.array(tholder)
+plt.plot(tt[range(0,len(tholder),intermediates+1)],aa[range(0,len(aholder),intermediates+1)],'o')
+fig.set_size_inches(5, 4)
+plt.show()
+
+# %%
+# @markdown Execute to get helper functions `epsilon_greedy`, `CliffWorld`, and `learn_environment`
+
+def epsilon_greedy(q, epsilon):
+  """Epsilon-greedy policy: selects the maximum value action with probabilty
+  (1-epsilon) and selects randomly with epsilon probability.
+
+  Args:
+    q (ndarray): an array of action values
+    epsilon (float): probability of selecting an action randomly
+
+  Returns:
+    int: the chosen action
+  """
+  if np.random.random() > epsilon:
+    action = np.argmax(q)
+  else:
+    action = np.random.choice(len(q))
+
+  return action
+
+#@title Plotting Functions
+
+def plot_state_action_values(env, value, ax=None):
+  """
+  Generate plot showing value of each action at each state.
+  """
+  if ax is None:
+    fig, ax = plt.subplots()
+
+  for a in range(env.n_actions):
+    ax.plot(range(env.n_states), value[:, a], marker='o', linestyle='--')
+  ax.set(xlabel='States', ylabel='Values')
+  ax.legend(['R','U','L','D'], loc='lower right')
+
+
+def plot_quiver_max_action(env, value, ax=None):
+  """
+  Generate plot showing action of maximum value or maximum probability at
+    each state (not for n-armed bandit or cheese_world).
+  """
+  if ax is None:
+    fig, ax = plt.subplots()
+
+  X = np.tile(np.arange(env.dim_x), [env.dim_y,1]) + 0.5
+  Y = np.tile(np.arange(env.dim_y)[::-1][:,np.newaxis], [1,env.dim_x]) + 0.5
+  which_max = np.reshape(value.argmax(axis=1), (env.dim_y,env.dim_x))
+  which_max = which_max[::-1,:]
+  U = np.zeros(X.shape)
+  V = np.zeros(X.shape)
+  U[which_max == 0] = 1
+  V[which_max == 1] = 1
+  U[which_max == 2] = -1
+  V[which_max == 3] = -1
+
+  ax.quiver(X, Y, U, V)
+  ax.set(
+      title='Maximum value/probability actions',
+      xlim=[-0.5, env.dim_x+0.5],
+      ylim=[-0.5, env.dim_y+0.5],
+  )
+  ax.set_xticks(np.linspace(0.5, env.dim_x-0.5, num=env.dim_x))
+  ax.set_xticklabels(["%d" % x for x in np.arange(env.dim_x)])
+  ax.set_xticks(np.arange(env.dim_x+1), minor=True)
+  ax.set_yticks(np.linspace(0.5, env.dim_y-0.5, num=env.dim_y))
+  ax.set_yticklabels(["%d" % y for y in np.arange(0, env.dim_y*env.dim_x,
+                                                  env.dim_x)])
+  ax.set_yticks(np.arange(env.dim_y+1), minor=True)
+  ax.grid(which='minor',linestyle='-')
+
+
+def plot_heatmap_max_val(env, value, ax=None):
+  """
+  Generate heatmap showing maximum value at each state
+  """
+  if ax is None:
+    fig, ax = plt.subplots()
+
+  if value.ndim == 1:
+      value_max = np.reshape(value, (env.dim_y,env.dim_x))
+  else:
+      value_max = np.reshape(value.max(axis=1), (env.dim_y,env.dim_x))
+  value_max = value_max[::-1,:]
+
+  im = ax.imshow(value_max, aspect='auto', interpolation='none', cmap='afmhot')
+  ax.set(title='Maximum value per state')
+  ax.set_xticks(np.linspace(0, env.dim_x-1, num=env.dim_x))
+  ax.set_xticklabels(["%d" % x for x in np.arange(env.dim_x)])
+  ax.set_yticks(np.linspace(0, env.dim_y-1, num=env.dim_y))
+  if env.name != 'windy_cliff_grid':
+      ax.set_yticklabels(
+          ["%d" % y for y in np.arange(
+              0, env.dim_y*env.dim_x, env.dim_x)][::-1])
+  return im
+
+
+def plot_rewards(n_episodes, rewards, average_range=10, ax=None):
+  """
+  Generate plot showing total reward accumulated in each episode.
+  """
+  if ax is None:
+    fig, ax = plt.subplots()
+
+  smoothed_rewards = (conv(rewards, np.ones(average_range), mode='same')
+                      / average_range)
+
+  ax.plot(range(0, n_episodes, average_range),
+          smoothed_rewards[0:n_episodes:average_range],
+          marker='o', linestyle='--')
+  ax.set(xlabel='Episodes', ylabel='Total reward')
+
+
+def plot_performance(env, value, reward_sums):
+  fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(16, 12))
+  plot_state_action_values(env, value, ax=axes[0,0])
+  plot_quiver_max_action(env, value, ax=axes[0,1])
+  plot_rewards(n_episodes, reward_sums, ax=axes[1,0])
+  im = plot_heatmap_max_val(env, value, ax=axes[1,1])
+  fig.colorbar(im)
+
+def learn_environment(env, learning_rule, params, max_steps, n_episodes, LIF, C):
+  # Start with a uniform value function
+  value = np.ones((env.n_states, env.n_actions))
+
+  # Run learning
+  reward_sums = np.zeros(n_episodes)
+  now = datetime.now()
+  # Loop over episodes
+  for episode in range(n_episodes):
+    state = env.init_state  # initialize state
+    reward_sum = 0
+
+    for t in range(max_steps):
+      # choose next action
+      action = epsilon_greedy(value[state], params['epsilon'])
+
+      # observe outcome of action on environment
+      next_state, reward = env.get_outcome(state, action, LIF, C)
+      arraysomething.append(1-reward)
+      print(t, 1-reward, reward)
+      print('action taken was', action)
+      print(np.mean(LIF.network_W.flatten()))
+      print('time taken is', datetime.now() - now, '\n')
+      now = datetime.now()
+
+      # update value function
+      value = learning_rule(state, action, reward, next_state, value, params)
+
+      # sum rewards obtained
+      reward_sum += reward
+
+      if next_state is None:
+          break  # episode ends
+      state = next_state
+
+    reward_sums[episode] = reward_sum
+
+  return value, reward_sums
+
+# %%
+arraysomething = []
+
+def q_learning(state, action, reward, next_state, value, params):
+  """Q-learning: updates the value function and returns it.
+
+  Args:
+    state (int): the current state identifier
+    action (int): the action taken
+    reward (float): the reward received
+    next_state (int): the transitioned to state identifier
+    value (ndarray): current value function of shape (n_states, n_actions)
+    params (dict): a dictionary containing the default parameters
+
+  Returns:
+    ndarray: the updated value function of shape (n_states, n_actions)
+  """
+  # Q-value of current state-action pair
+  q = value[state, action]
+
+  # write an expression for finding the maximum Q-value at the current state
+  if next_state is None:
+    max_next_q = 0
+  else:
+    max_next_q = np.max(value[next_state])
+
+  # write the expression to compute the TD error
+  td_error = reward + params['gamma'] * max_next_q - q
+  # write the expression that updates the Q-value for the state-action pair
+  value[state, action] = q + params['alpha'] * td_error
+
+  return value
+
+
+# set for reproducibility, comment out / change seed value for different results
+np.random.seed(1)
+
+# parameters needed by our policy and learning rule
+params = {
+  'epsilon': 0.3,  # epsilon-greedy policy
+  'alpha': 0.1,  # learning rate
+  'gamma': 1.0,  # discount factor
+}
+
+# episodes/trials
+n_episodes = 1
+max_steps = 1000
+
+# environment initialization
+env = StimulusInput()
+
+# solve Cliff World using Q-learning
+results = learn_environment(env, q_learning, params, max_steps, n_episodes, LIF, ConnStimNetwork)
+value_qlearning, reward_sums_qlearning = results
+plt.plot(np.arange(0,len(arraysomething),1),arraysomething)
+
+# %%
+print(value_qlearning, reward_sums_qlearning)
+
+# %%
+plot_performance(env, value_qlearning, reward_sums_qlearning)
+
+# %%
+def q_learning(state, action, reward, next_state, value, params):
+  """Q-learning: updates the value function and returns it.
+
+  Args:
+    state (int): the current state identifier
+    action (int): the action taken
+    reward (float): the reward received
+    next_state (int): the transitioned to state identifier
+    value (ndarray): current value function of shape (n_states, n_actions)
+    params (dict): a dictionary containing the default parameters
+
+  Returns:
+    ndarray: the updated value function of shape (n_states, n_actions)
+  """
+  # Q-value of current state-action pair
+  q = value[state, action]
+
+  # write an expression for finding the maximum Q-value at the current state
+  if next_state is None:
+    max_next_q = 0
+  else:
+    max_next_q = np.max(value[next_state])
+
+  # write the expression to compute the TD error
+  td_error = reward + params['gamma'] * max_next_q - q
+  # write the expression that updates the Q-value for the state-action pair
+  value[state, action] = q + params['alpha'] * td_error
+
+  return value
+
+
+# set for reproducibility, comment out / change seed value for different results
+np.random.seed(1)
+
+# parameters needed by our policy and learning rule
+params = {
+  'epsilon': 0.4,  # epsilon-greedy policy
+  'alpha': 0.1,  # learning rate
+  'gamma': 1.0,  # discount factor
+}
+
+# episodes/trials
+n_episodes = 10
+max_steps = 1000
+
+# environment initialization
+LIF = LIF_Network()
+env = LearningWorld()
+
+# solve Cliff World using Q-learning
+results = learn_environment(env, q_learning, params, max_steps, n_episodes, LIF, ConnStimNetwork)
+value_qlearning, reward_sums_qlearning = results
+print(value_qlearning, reward_sums_qlearning)
+
+# %%
+plot_performance(env, value_qlearning, reward_sums_qlearning)
+
+# %% [markdown]
+# # Citations
+# <a name="citations">
+# </a>
+# 
+# 
+
+# %% [markdown]
+# Kromer JA, Khaledi-Nasab A, Tass PA. Impact of number of stimulation sites on long-lasting desynchronization effects of coordinated reset stimulation. Chaos. 2020 Aug;30(8):083134. doi: 10.1063/5.0015196. PMID: 32872805.
+# 
+
+
