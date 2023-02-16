@@ -480,6 +480,14 @@ class LIF_Network:
 
     Essentially, this is a more accurate version of the `vect_kuramato` method.
 
+    ## TODO (Tony): 
+    - [ ] Rename the period argument, name is misleading.
+
+    ## NOTES (Tony): 
+    - The higher the period value, the higher the resolution in the calculation
+      especially when converting to radians. Perhaps period of 100ms is adequate
+      as it would divide 2pi into 1000 sections.
+
     Args: 
       period: [count] The number of sections to split a period into.
         If set to the None, we are assuming a period of 100ms and timesteps of 
@@ -540,7 +548,7 @@ class LIF_Network:
 
   def simulate(self, 
                sim_duration:float = 1, 
-               epoch_current_input:"np.NDarray" = None):
+               epoch_current_i:"np.NDarray" = None):
     """Run simulation
 
     Args: 
@@ -659,11 +667,11 @@ class LIF_Network:
       # self.syn_g = ((1-self.dt) * self.syn_g + 
       #               self.per_neuron_coup_strength * self.network_input)
       ## Option 2: Exponential decay ##
-      self.noise_g = (self.noise_g * np.exp(-self.dt/self.syn_tau) + 
-                      self.g_poisson * self.poisson_input_flag)  # Poisson conductance * poisson_input_flag makes sense because poisson_input_flag is binary outcome.
-      self.syn_g = (self.syn_g * np.exp(-self.dt/self.syn_tau) + 
-                    self.per_neuron_coup_strength * self.network_input +
-                    self.external_stim_coup_strength * epoch_current_input[step][:])
+      self.noise_g = (self.noise_g * np.exp(-self.dt/self.syn_tau) 
+                      + self.g_poisson * self.poisson_input_flag)  # Poisson conductance * poisson_input_flag makes sense because poisson_input_flag is binary outcome.
+      self.syn_g = (self.syn_g * np.exp(-self.dt/self.syn_tau)
+                    + self.per_neuron_coup_strength * self.network_input
+                    + self.external_stim_coup_strength * epoch_current_input[step][:])
 
 
       ## Reset inputs
@@ -673,12 +681,15 @@ class LIF_Network:
 
       ## Update membrane-potential, spiking-threshold
       # Dynamic membrane potential
-      self.v = self.v + self.dt * (((self.v_rest - self.v) - 
-                                    (self.noise_g + self.syn_g) * self.v) / 
-                                   self.m_tau)
+      self.v = self.v + self.dt * (((self.v_rest - self.v)
+                                    - (self.noise_g + self.syn_g) 
+                                    * self.v)
+                                   / self.m_tau)
       # Dynamic spiking threshold
-      self.v_thr = (self.v_thr + 
-                    self.dt * (self.v_rf_thr - self.v_thr) / self.v_rf_tau)
+      self.v_thr = (self.v_thr
+                    + self.dt 
+                      * (self.v_rf_thr - self.v_thr) 
+                      / self.v_rf_tau)
 
       ## Depolarizing to meet spiking-threshold
       spike = ((self.v >= self.v_thr) *  # Met dynamic spiking threshold
