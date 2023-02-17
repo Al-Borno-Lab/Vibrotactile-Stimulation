@@ -22,6 +22,7 @@ n_finger = 10                # Number of fingers
 n_neurons = 200              # Number of neurons
 proba_conn = 0.2             # Probability of connection for finger-to-neuron 
 glove_stim_duration = 20000  # milliseconds
+glove_stim_duration = 100    ##### TEST (Tony) - Shortened duration for testing
 # NOTE (Tony): The kuramato method is weird and is pending to be fixed. 
 #   Setting to None allows for 1000/0.1 = 1000 sections for the period 
 #   calculation and thus is more accurate.
@@ -89,7 +90,7 @@ for step in range(euler_steps):
     # before simulation can be ran here. Github issue has been submitted.
     LIF.simulate(sim_duration = glove_stim_duration, 
                  epoch_current_input = None)
-    
+
     ## Post simulation network connection weights
     # post_sim_W = LIF.network_W
     # post_sim_W_mean = post_sim_W[post_sim_W > 0].mean()
