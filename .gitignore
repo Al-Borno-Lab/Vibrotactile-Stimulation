@@ -1,3 +1,7 @@
+########## Folders to ignore ###
+ipynb/
+
+
 ########## Mac Ignore ##########
 .DS_Store
 
