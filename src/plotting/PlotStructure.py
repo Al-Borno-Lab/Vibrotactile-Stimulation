@@ -1,4 +1,10 @@
-figure_size = [10,8]
+import matplotlib.pyplot as plt    # MatPlotLib is a plotting package. 
+import numpy as np                 # NumPy is a numerical types package.
+from scipy import stats            # ScPy is a scientific computing package. We just want the stats, because Ca2+ imaging is always calculated in z-score.
+from scipy.stats import circmean
+import math
+from posixpath import join
+# from ..model import LIFNetwork as LIF
 
 def plot_structure(LIF, conn= False, conn_target = None):
   if conn == True and conn_target is None:
@@ -22,7 +28,6 @@ def plot_structure(LIF, conn= False, conn_target = None):
   plt.show()
 
 def plot_connectivity(LIF):
-  %matplotlib inline
   fig = plt.figure()
   ax = fig.add_subplot()
   plt.imshow(LIF.network_conn,aspect='equal',interpolation='none')
@@ -36,7 +41,6 @@ def plot_connectivity(LIF):
 def plot_voltage(sim, n = 5):
 
   [v,g,p,t,inp,dw] = sim
-  %matplotlib inline
   fig = plt.figure()
   for i in range(n):
     plt.plot(t[:-1],v[:-1,i]-i*100)
@@ -56,7 +60,6 @@ def plotter(LIF,time,pN = 5):
   ax.set_title('Location of cells')
   plt.show()
 
-  %matplotlib inline
   fig = plt.figure()
   ax = fig.add_subplot()
   plt.imshow(LIF.network_conn,aspect='equal',interpolation='none')
@@ -67,7 +70,6 @@ def plotter(LIF,time,pN = 5):
   plt.show()
   print(np.mean(LIF.network_conn.flatten()))
 
-  %matplotlib inline
   fig = plt.figure()
   ax = fig.add_subplot()
   plt.imshow(LIF.network_W,aspect='equal',interpolation='none')
@@ -80,7 +82,6 @@ def plotter(LIF,time,pN = 5):
 
   W = np.copy(LIF.network_W)
   Wf = W.flatten()
-  %matplotlib inline
   fig = plt.figure()
   plt.plot(np.sort(Wf[Wf>0]))
   plt.xlabel('order of weights')
@@ -93,7 +94,6 @@ def plotter(LIF,time,pN = 5):
   [v,g,p,t,inp,dw] = h
   W2 = LIF.network_W
   
-  %matplotlib inline
   fig = plt.figure()
   ax = fig.add_subplot()
   plt.imshow(W2,aspect='equal',interpolation='none')
@@ -104,7 +104,6 @@ def plotter(LIF,time,pN = 5):
   plt.title('Weights after-training')
   plt.show()
 
-  %matplotlib inline
   fig = plt.figure()
   ax = fig.add_subplot()
   plt.imshow((W2-W),aspect='equal',interpolation='none')
@@ -117,7 +116,6 @@ def plotter(LIF,time,pN = 5):
 
   print(np.mean(W2[W2 > 0].flatten()))
   Wf2 = W2.flatten()
-  %matplotlib inline
   fig = plt.figure()
   plt.plot(np.sort(Wf[Wf>0]))
   plt.plot(np.sort(Wf2[Wf>0]))
@@ -125,7 +123,6 @@ def plotter(LIF,time,pN = 5):
   plt.ylabel('weight')
   plt.show()
 
-  %matplotlib inline
   fig = plt.figure()
   for i in range(pN):
     plt.plot(t,v[:,i]-i*100)
@@ -134,7 +131,6 @@ def plotter(LIF,time,pN = 5):
   plt.title('example neural activity')
   plt.show()
 
-  %matplotlib inline
   fig = plt.figure()
   for i in range(pN):
     plt.plot(t,g[:,i]-i*50)  # ??? What is this 50??? 
@@ -143,7 +139,6 @@ def plotter(LIF,time,pN = 5):
   plt.title('example neural currents')
   plt.show()
 
-  %matplotlib inline
   fig = plt.figure()
   for i in range(pN):
     plt.plot(t,p[:,i]-i*1)
@@ -152,7 +147,6 @@ def plotter(LIF,time,pN = 5):
   plt.title('example external inputs')
   plt.show()
 
-  %matplotlib inline
   fig = plt.figure()
   for i in range(2):
     plt.plot(t,inp[:,i])
@@ -161,7 +155,6 @@ def plotter(LIF,time,pN = 5):
   plt.title('example internal inputs')
   plt.show()
 
-  %matplotlib inline
   fig = plt.figure()
   plt.plot(t,dw)
   plt.xlabel('time [ms]')
@@ -175,7 +168,7 @@ def plotter(LIF,time,pN = 5):
 
 
 
-def plotter2(LIF:LIF_Network, 
+def plotter2(LIF:"LIF_Network", 
              sim_duration, 
              I:"ndarray", 
              pN = 5):
@@ -196,7 +189,6 @@ def plotter2(LIF:LIF_Network,
   # [v,g,p,t,inp,dw] = h
   W2 = LIF.network_W
 
-  %matplotlib inline
   fig = plt.figure()
  
   # for i in range(pN):
