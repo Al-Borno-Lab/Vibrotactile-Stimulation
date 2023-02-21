@@ -1,3 +1,5 @@
+import numpy as np
+
 def q_learning(state, action, reward, next_state, value, params):
   """Q-learning: updates the value function and returns it.
 

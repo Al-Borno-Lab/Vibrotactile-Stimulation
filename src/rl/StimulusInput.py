@@ -1,3 +1,5 @@
+import numpy as np
+
 class StimulusInput:
   def __init__(self):
     self.name = "Stimulus Input"

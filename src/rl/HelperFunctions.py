@@ -1,3 +1,7 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import datetime
+
 # @markdown Execute to get helper functions `epsilon_greedy`, `CliffWorld`, and `learn_environment`
 
 def epsilon_greedy(q, epsilon):
@@ -100,7 +104,7 @@ def plot_rewards(n_episodes, rewards, average_range=10, ax=None):
   if ax is None:
     fig, ax = plt.subplots()
 
-  smoothed_rewards = (conv(rewards, np.ones(average_range), mode='same')
+  smoothed_rewards = (np.convolve(rewards, np.ones(average_range), mode='same')
                       / average_range)
 
   ax.plot(range(0, n_episodes, average_range),
@@ -109,13 +113,15 @@ def plot_rewards(n_episodes, rewards, average_range=10, ax=None):
   ax.set(xlabel='Episodes', ylabel='Total reward')
 
 
-def plot_performance(env, value, reward_sums):
+def plot_performance(n_episodes, env, value, reward_sums):
   fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(16, 12))
   plot_state_action_values(env, value, ax=axes[0,0])
   plot_quiver_max_action(env, value, ax=axes[0,1])
   plot_rewards(n_episodes, reward_sums, ax=axes[1,0])
   im = plot_heatmap_max_val(env, value, ax=axes[1,1])
   fig.colorbar(im)
+
+arraysomething = []
 
 def learn_environment(env, learning_rule, params, max_steps, n_episodes, LIF, C):
   # Start with a uniform value function
