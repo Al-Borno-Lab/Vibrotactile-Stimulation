@@ -140,6 +140,50 @@ class LIF_Network:
                       (self.mean_w / np.mean(self.network_W[self.network_W > 0])))          
     self.network_W[self.network_W > 1] = 1
     self.network_W[self.network_W < 0] = 0
+
+  def structured_conn(self,LIF,):
+    self.network_conn = np.zeros([self.n_neurons,self.n_neurons])  
+    dist=np.empty([self.n_neurons,self.n_neurons])
+    dist[:] = np.nan
+    dist1=[]
+    c=[]
+    for f in range(LIF.n_neurons-1):
+      i=f
+      for j in range(f+1,LIF.n_neurons,1):
+        a=(LIF.x[i]-LIF.x[j])*(LIF.x[i]-LIF.x[j])+(LIF.y[i]-LIF.y[j])*(LIF.y[i]-LIF.y[j])+(LIF.z[i]-LIF.z[j])*(LIF.z[i]-LIF.z[j])
+        b=np.sqrt(a)
+        c.append(b)
+      #print('distance between neurons', i+1, 'and', j+1, ': ', b)
+    d=sum(c)/len(c)
+    print('The average distance between neurons in this network is:', d)
+    print('The base of the exponent is:', LIF.p_conn**(1/d))
+    bb=[]
+    cc=[]
+    for p in range(LIF.n_neurons):
+      for p2 in range(LIF.n_neurons):
+        if(p!=p2):
+          a=(LIF.x[p]-LIF.x[p2])*(LIF.x[p]-LIF.x[p2])+(LIF.y[p]-LIF.y[p2])*(LIF.y[p]-LIF.y[p2])+(LIF.z[p]-LIF.z[p2])*(LIF.z[p]-LIF.z[p2])
+          b=np.sqrt(a)
+          dist1.append(b)
+    for p in range(LIF.n_neurons):
+      for p2 in range(LIF.n_neurons):
+        if(p!=p2):
+          a=(LIF.x[p]-LIF.x[p2])*(LIF.x[p]-LIF.x[p2])+(LIF.y[p]-LIF.y[p2])*(LIF.y[p]-LIF.y[p2])+(LIF.z[p]-LIF.z[p2])*(LIF.z[p]-LIF.z[p2])
+          b=np.sqrt(a)
+          #aa=((LIF.p_conn**(1/d)) ** b)
+          aa=2.71828**(-b/(LIF.p_conn*max(dist1)))
+          pc = np.random.random(size=(1,))
+          if(pc<aa):
+            self.network_conn[p][p2] = 1
+            dist[p][p2]=b
+    ## Tony - Verify that this block below is indeed not needed.
+    # self.network_W = np.random.random(size=(self.n_neurons,self.n_neurons))
+    # self.network_W[self.network_conn == 0] = 0
+    # self.network_W = self.network_W/np.mean(self.network_W[self.network_W > 0]) * self.mean_w
+    # self.network_W[self.network_W > 1] = 1
+    # self.network_W[self.network_W < 0] = 0
+    return dist
+
     
   def simulate_poisson(self,):
     """Generate Poisson spike trains.
