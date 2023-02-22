@@ -33,9 +33,8 @@ def plot_structure(LIF,
   if conn == True and conn_target is None:
     conn_target = range(LIF.n_neurons)
   
-  fig, ax = plt.subplots(projection="3d")
-  # fig = plt.figure()
-  # ax = fig.add_subplot(projection='3d')
+  fig = plt.figure()
+  ax = fig.add_subplot(projection='3d')
   ax.scatter(LIF.x, LIF.y, LIF.z)
   ax.set_xlabel('X')
   ax.set_ylabel('Y')
@@ -55,7 +54,7 @@ def plot_structure(LIF,
                   color=cm(i),
                   linewidth=.75)
   # plt.show()
-  return ax
+  return fig
 
 def plot_connectivity(LIF):
 
