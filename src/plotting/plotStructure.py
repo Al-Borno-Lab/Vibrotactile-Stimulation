@@ -4,14 +4,39 @@ from scipy import stats            # ScPy is a scientific computing package. We 
 from scipy.stats import circmean
 import math
 from posixpath import join
-# from ..model import LIFNetwork as LIF
+from ..model import lifNetwork as lif
+from typing import Type
 
-def plot_structure(LIF, conn= False, conn_target = None):
+def plot_structure(LIF, 
+                   conn: bool = False, 
+                   conn_target: list = None,
+                   figure_size: list = [10, 8]) -> plt.Axes:
+  """Plots the 3D structure of the LIF network with options to plot connections.
+
+  Args:
+      LIF (LIF_Network): An instance of the LIF_Network object.
+      conn (bool, optional): Whether to plot connections. Defaults to False.
+      conn_target (list, optional): List of neurons' index to plot connectivity
+        with indicated neuron as presynaptic neuron. Defaults to None.
+      figure_size (list): Indicates the plot dimensions in inches.
+
+  Returns:
+      plt.Axes: Returns the matplotlib.Axes object of which the plot is on.
+
+  Additional notes: 
+  - `conn_target` is  a list of neurons' index that we desire to plot the
+    the connectivity with these neurons as the presynaptic neurons. For example, 
+    if `2` is in the list, all connections that have neuron index 2 as 
+    presynaptic connection will be plotted in the 3D plot.
+  """
+
   if conn == True and conn_target is None:
     conn_target = range(LIF.n_neurons)
-  fig = plt.figure()
-  ax = fig.add_subplot(projection='3d')
-  ax.scatter(LIF.x,LIF.y,LIF.z)
+  
+  fig, ax = plt.subplots(projection="3d")
+  # fig = plt.figure()
+  # ax = fig.add_subplot(projection='3d')
+  ax.scatter(LIF.x, LIF.y, LIF.z)
   ax.set_xlabel('X')
   ax.set_ylabel('Y')
   ax.set_zlabel('Z')
@@ -24,10 +49,16 @@ def plot_structure(LIF, conn= False, conn_target = None):
     for i in range(LIF.n_neurons):
       for j in range(LIF.n_neurons):
         if C[i][j] > 0 and i in conn_target:
-          ax.plot([LIF.x[i], LIF.x[j]], [LIF.y[i], LIF.y[j]], [LIF.z[i], LIF.z[j]], color=cm(i),linewidth=.75)
-  plt.show()
+          ax.plot([LIF.x[i], LIF.x[j]], 
+                  [LIF.y[i], LIF.y[j]], 
+                  [LIF.z[i], LIF.z[j]], 
+                  color=cm(i),
+                  linewidth=.75)
+  # plt.show()
+  return ax
 
 def plot_connectivity(LIF):
+
   fig = plt.figure()
   ax = fig.add_subplot()
   plt.imshow(LIF.network_conn,aspect='equal',interpolation='none')
@@ -49,6 +80,22 @@ def plot_voltage(sim, n = 5):
   plt.title('example voltages')
   plt.gcf().set_size_inches(figure_size[0], figure_size[1])
   plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 def plotter(LIF,time,pN = 5):
   fig = plt.figure()
