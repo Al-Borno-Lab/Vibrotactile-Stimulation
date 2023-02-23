@@ -1,7 +1,5 @@
 ########## Folders to ignore ###
-ipynb/
-ignored_dir/
-
+ignored_dir
 
 ########## Mac Ignore ##########
 .DS_Store
@@ -89,7 +87,7 @@ target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
-*.ipynb
+# *.ipynb
 
 # IPython
 profile_default/
