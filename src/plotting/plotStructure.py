@@ -396,9 +396,9 @@ def plotter(LIF: lif.LIF_Network,
 
 
 
-def plotter2(LIF:"LIF_Network", 
+def plotter2(LIF: lif.LIF_Network, 
              sim_duration, 
-             I:"ndarray", 
+             I: npt.NDArray, 
              pN = 5):
   """
 
