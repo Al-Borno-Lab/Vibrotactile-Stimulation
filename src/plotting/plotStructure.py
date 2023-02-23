@@ -78,11 +78,12 @@ def plot_connectivity(LIF: lif.LIF_Network) -> matplotlib.figure.Figure:
 
   fig = plt.figure()
   ax = fig.add_subplot()
-  ax.matshow(LIF.network_conn)
+  cax = ax.matshow(LIF.network_conn)
   ax.set_ylabel("Neuron Index")
   ax.set_xlabel("Connectivity to other neurons (index)")
   ax.set_title("Connectivity matrix")
-  
+  fig.colorbar(cax)
+
   # plt.show()
   plt.close()  # In case fig is not garbage collected
   return fig
@@ -129,11 +130,12 @@ def plot_connection_weight(LIF: lif.LIF_Network) -> matplotlib.figure.Figure:
   """
   fig = plt.figure()
   ax = fig.add_subplot()
-  ax.matshow(LIF.network_W)
+  cax = ax.matshow(LIF.network_W)
   ax.set_ylabel("Neuron Index")
   ax.set_xlabel("Weight to other neurons (index)")
   ax.set_title("Connectivity matrix")
-
+  fig.colorbar(cax)
+  
   # plt.show()
   plt.close()  # In case fig is not garbage collected
   return fig
