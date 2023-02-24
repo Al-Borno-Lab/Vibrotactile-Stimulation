@@ -328,7 +328,8 @@ def plot_delta_weight(sim: List[npt.NDArray],
 ################################################################################
 ## Plot dashboard like plots
 ################################################################################
-def plot_network_snapshot(LIF: lif.LIF_Network, plot_name: str = None) -> matplotlib.figure.Figure:
+def plot_network_snapshot(LIF: lif.LIF_Network, 
+                          plot_name: str = None) -> matplotlib.figure.Figure:
   """Return network snapshot of multiple plotes (connection, weight, sorted_W).
 
   The colorbar is not able to be shown due to how it being plotted in figures.
@@ -355,13 +356,17 @@ def plot_network_snapshot(LIF: lif.LIF_Network, plot_name: str = None) -> matplo
   plot_conn_w(LIF, ax=axs["upper mid"])
   plot_sorted_weights(LIF, ax=axs["upper right"])
   
-  fig.suptitle("LIF Network Snapshot", fontsize=16)
+  if plot_name is None: 
+    fig.suptitle("LIF Network Snapshot", fontsize=16)
+  else: 
+    fig.suptitle(f"{plot_name}", fontsize=16)
 
   plt.close()
   return fig
 
 def plot_network_neuron_activity(sim_result: List[npt.NDArray], 
-                                 n_neuron: int = 5) -> matplotlib.figure.Figure:
+                                 n_neuron: int = 5, 
+                                 plot_name: str =  None) -> matplotlib.figure.Figure:
   """Return a quick plot of neuron activity after `LIF_Network.simulate()`.
 
   Args:
@@ -379,10 +384,14 @@ def plot_network_neuron_activity(sim_result: List[npt.NDArray],
                                  layout="constrained")
   plot_neural_voltage(sim_result, ax=axs["one"], n=n_neuron)
   plot_neural_current(sim_result, ax=axs["two"], n=n_neuron)
-  plot_internal_inputs(sim_result, ax=axs["three"], n=n_neuron)
+  plot_internal_input(sim_result, ax=axs["three"], n=n_neuron)
   plot_external_input(sim_result, ax=axs["four"], n=n_neuron)
   plot_delta_weight(sim_result, ax=axs["five"], n=n_neuron)
-  fig.suptitle(f"First {n_neuron} Neuron Simulation Activity Snapshot", fontsize=16)
+
+  if plot_name is None: 
+    fig.suptitle(f"First {n_neuron} Neuron Simulation Activity Snapshot", fontsize=16)
+  else: 
+    fig.suptitle(f"{plot_name}", fontsize=16)
 
   plt.close()
   return fig
