@@ -234,7 +234,7 @@ def plot_neural_current(sim: List[npt.NDArray],
   plt.close()
   return fig
 
-def plot_external_inputs(sim: List[npt.NDArray], 
+def plot_external_input(sim: List[npt.NDArray], 
                          n: int = 5, 
                          figure_size: List = [10, 8], 
                          ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure: 
@@ -262,7 +262,7 @@ def plot_external_inputs(sim: List[npt.NDArray],
   plt.close()
   return fig
 
-def plot_internal_inputs(sim: List[npt.NDArray], 
+def plot_internal_input(sim: List[npt.NDArray], 
                          n: int = 5, 
                          figure_size: List = [10, 8], 
                          ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure: 
@@ -380,9 +380,8 @@ def plot_network_neuron_activity(sim_result: List[npt.NDArray],
   plot_neural_voltage(sim_result, ax=axs["one"], n=n_neuron)
   plot_neural_current(sim_result, ax=axs["two"], n=n_neuron)
   plot_internal_inputs(sim_result, ax=axs["three"], n=n_neuron)
-  plot_external_inputs(sim_result, ax=axs["four"], n=n_neuron)
+  plot_external_input(sim_result, ax=axs["four"], n=n_neuron)
   plot_delta_weight(sim_result, ax=axs["five"], n=n_neuron)
-
   fig.suptitle(f"First {n_neuron} Neuron Simulation Activity Snapshot", fontsize=16)
 
   plt.close()
@@ -452,9 +451,8 @@ def plotter(LIF: lif.LIF_Network,
   display(post_train_neuronal_current)
 
   # # Plot external inputs (poisson spikes)
-  post_train_external_inputs = plot_external_inputs(simulation_results, pN)
+  post_train_external_inputs = plot_external_input(simulation_results, pN)
   display(post_train_external_inputs)
-
   # # Plot internal inputs
   post_train_internal_inputs = plot_internal_inputs(simulation_results, pN)
   display(post_train_internal_inputs)
