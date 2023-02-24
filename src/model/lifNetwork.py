@@ -527,6 +527,8 @@ class LIF_Network:
 
     Essentially, this is a more accurate version of the `vect_kuramato` method.
 
+    Simulation duration has to >= period.
+
     Args: 
       period: [count] The number of sections to split a period into.
         If set to the None, we are assuming a period of 100ms and timesteps of 
