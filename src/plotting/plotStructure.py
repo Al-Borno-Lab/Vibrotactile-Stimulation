@@ -377,7 +377,7 @@ def plot_network_neuron_activity(sim_result: List[npt.NDArray],
                                  ["five", "five"]], 
                                  figsize=(25, 30),
                                  layout="constrained")
-  plot_voltage(sim_result, ax=axs["one"], n=n_neuron)
+  plot_neural_voltage(sim_result, ax=axs["one"], n=n_neuron)
   plot_neural_currents(sim_result, ax=axs["two"], n=n_neuron)
   plot_internal_inputs(sim_result, ax=axs["three"], n=n_neuron)
   plot_external_inputs(sim_result, ax=axs["four"], n=n_neuron)
@@ -444,7 +444,7 @@ def plotter(LIF: lif.LIF_Network,
   display(post_train_sorted_weight)
 
   # # Plot example neural activity = voltage
-  post_train_neuronal_voltage = plot_voltage(simulation_results, pN)
+  post_train_neuronal_voltage = plot_neural_voltage(simulation_results, pN)
   display(post_train_neuronal_voltage)
 
   # # Plot neural current 
