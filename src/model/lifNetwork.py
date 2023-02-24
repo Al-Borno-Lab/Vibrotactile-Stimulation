@@ -527,14 +527,6 @@ class LIF_Network:
 
     Essentially, this is a more accurate version of the `vect_kuramato` method.
 
-    ## TODO (Tony): 
-    - [ ] Rename the period argument, name is misleading.
-
-    ## NOTES (Tony): 
-    - The higher the period value, the higher the resolution in the calculation
-      especially when converting to radians. Perhaps period of 100ms is adequate
-      as it would divide 2pi into 1000 sections.
-
     Args: 
       period: [count] The number of sections to split a period into.
         If set to the None, we are assuming a period of 100ms and timesteps of 
@@ -547,6 +539,15 @@ class LIF_Network:
       r: [radian] Magnitude of the mean Kuramato vectors of all neurons.
 
     """
+    
+    ## TODO (Tony): 
+    # - [ ] Rename the period argument, name is misleading.
+
+    ## NOTES (Tony): 
+    # - The higher the period value, the higher the resolution in the calculation
+    #  especially when converting to radians. Perhaps period of 100ms is adequate
+    #  as it would divide 2pi into 1000 sections.
+
 
     if period is None:
       period=100/self.dt  # 100ms for a cycle; given dt=0.1, thus 1000 sections.
