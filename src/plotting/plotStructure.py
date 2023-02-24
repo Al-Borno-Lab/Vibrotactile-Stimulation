@@ -71,7 +71,7 @@ def plot_structure(LIF: lif.LIF_Network,
   return fig
 
 def plot_conn_mat(LIF: lif.LIF_Network, 
-                      ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure:
+                  ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure:
   """Return the LIF instance connectivity matrix.
 
   Args:
@@ -95,7 +95,7 @@ def plot_conn_mat(LIF: lif.LIF_Network,
   return fig
 
 def plot_conn_w(LIF: lif.LIF_Network, 
-                           ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure:
+                ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure:
   """Return network connection weights.
 
   Args:
@@ -118,7 +118,7 @@ def plot_conn_w(LIF: lif.LIF_Network,
   return fig
 
 def plot_sorted_weights(LIF: lif.LIF_Network, 
-                        ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure:
+                  ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure:
   """Return plot of sorted connection-weights. 
 
   Args:
@@ -160,7 +160,7 @@ def plot_sorted_weights(LIF: lif.LIF_Network,
 ## Plot Neural activity snapshot after simulation
 ################################################################################
 def plot_weight_change(weight_diff: npt.NDArray, 
-                       ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure:
+                  ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure:
   fig = plt.figure()
   if ax is None: 
     ax = fig.add_subplot()
@@ -206,9 +206,9 @@ def plot_neural_voltage(sim: List[npt.NDArray],
   return fig
 
 def plot_neural_current(sim: List[npt.NDArray], 
-                         n: int = 5, 
-                         figure_size: List = [10, 8],
-                         ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure: 
+                  n: int = 5, 
+                  figure_size: List = [10, 8],
+                  ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure: 
   """Return current plot using values returned by `LIF_Network.simulate()`.
 
   Args:
@@ -235,9 +235,9 @@ def plot_neural_current(sim: List[npt.NDArray],
   return fig
 
 def plot_external_input(sim: List[npt.NDArray], 
-                         n: int = 5, 
-                         figure_size: List = [10, 8], 
-                         ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure: 
+                  n: int = 5, 
+                  figure_size: List = [10, 8], 
+                  ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure: 
   """Return external-input plot using values returned by `LIF_Network.simulate()`.
 
   Args:
@@ -263,9 +263,9 @@ def plot_external_input(sim: List[npt.NDArray],
   return fig
 
 def plot_internal_input(sim: List[npt.NDArray], 
-                         n: int = 5, 
-                         figure_size: List = [10, 8], 
-                         ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure: 
+                  n: int = 5, 
+                  figure_size: List = [10, 8], 
+                  ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure: 
   """Return internal-input plot using values returned by `LIF_Network.simulate()`.
 
   Args:
@@ -294,9 +294,9 @@ def plot_internal_input(sim: List[npt.NDArray],
   return fig
 
 def plot_delta_weight(sim: List[npt.NDArray], 
-                      n: int = 5, 
-                      figure_size: List = [10, 8], 
-                      ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure: 
+                  n: int = 5, 
+                  figure_size: List = [10, 8], 
+                  ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure: 
   """Return weight-change plot using values returned by `LIF_Network.simulate()`.
 
   Args:
@@ -365,8 +365,8 @@ def plot_network_snapshot(LIF: lif.LIF_Network,
   return fig
 
 def plot_network_neuron_activity(sim_result: List[npt.NDArray], 
-                                 n_neuron: int = 5, 
-                                 plot_name: str =  None) -> matplotlib.figure.Figure:
+                          n_neuron: int = 5, 
+                          plot_name: str =  None) -> matplotlib.figure.Figure:
   """Return a quick plot of neuron activity after `LIF_Network.simulate()`.
 
   Args:
@@ -389,7 +389,8 @@ def plot_network_neuron_activity(sim_result: List[npt.NDArray],
   plot_delta_weight(sim_result, ax=axs["five"], n=n_neuron)
 
   if plot_name is None: 
-    fig.suptitle(f"First {n_neuron} Neuron Simulation Activity Snapshot", fontsize=16)
+    fig.suptitle(f"First {n_neuron} Neuron Simulation Activity Snapshot", 
+                 fontsize=16)
   else: 
     fig.suptitle(f"{plot_name}", fontsize=16)
 
@@ -459,12 +460,12 @@ def plotter(LIF: lif.LIF_Network,
   post_train_neuronal_current = plot_neural_current(simulation_results, pN)
   display(post_train_neuronal_current)
 
-  # # Plot external inputs (poisson spikes)
-  post_train_external_inputs = plot_external_input(simulation_results, pN)
-  display(post_train_external_inputs)
-  # # Plot internal inputs
-  post_train_internal_inputs = plot_internal_inputs(simulation_results, pN)
-  display(post_train_internal_inputs)
+  # # Plot external input (poisson spikes)
+  post_train_external_input = plot_external_input(simulation_results, pN)
+  display(post_train_external_input)
+  # # Plot internal input
+  post_train_internal_input = plot_internal_input(simulation_results, pN)
+  display(post_train_internal_input)
 
   # # Plot weight changes
   post_train_weight_changes = plot_delta_weight(simulation_results, pN)
