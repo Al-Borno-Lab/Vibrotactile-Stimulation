@@ -175,7 +175,7 @@ def plot_weight_change(weight_diff: npt.NDArray,
   plt.close()
   return fig
 
-def plot_voltage(sim: List[npt.NDArray], 
+def plot_neural_voltage(sim: List[npt.NDArray], 
                  n: int = 5, 
                  figure_size: List = [10, 8], 
                  ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure:
