@@ -205,7 +205,7 @@ def plot_neural_voltage(sim: List[npt.NDArray],
   plt.close()  # In case fig isn't collected by garbage colleciton
   return fig
 
-def plot_neural_currents(sim: List[npt.NDArray], 
+def plot_neural_current(sim: List[npt.NDArray], 
                          n: int = 5, 
                          figure_size: List = [10, 8],
                          ax: matplotlib.axes.Axes = None) -> matplotlib.figure.Figure: 
@@ -378,7 +378,7 @@ def plot_network_neuron_activity(sim_result: List[npt.NDArray],
                                  figsize=(25, 30),
                                  layout="constrained")
   plot_neural_voltage(sim_result, ax=axs["one"], n=n_neuron)
-  plot_neural_currents(sim_result, ax=axs["two"], n=n_neuron)
+  plot_neural_current(sim_result, ax=axs["two"], n=n_neuron)
   plot_internal_inputs(sim_result, ax=axs["three"], n=n_neuron)
   plot_external_inputs(sim_result, ax=axs["four"], n=n_neuron)
   plot_delta_weight(sim_result, ax=axs["five"], n=n_neuron)
@@ -448,7 +448,7 @@ def plotter(LIF: lif.LIF_Network,
   display(post_train_neuronal_voltage)
 
   # # Plot neural current 
-  post_train_neuronal_current = plot_neural_currents(simulation_results, pN)
+  post_train_neuronal_current = plot_neural_current(simulation_results, pN)
   display(post_train_neuronal_current)
 
   # # Plot external inputs (poisson spikes)
