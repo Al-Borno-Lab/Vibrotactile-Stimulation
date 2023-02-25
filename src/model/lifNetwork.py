@@ -517,7 +517,9 @@ class LIF_Network:
     return r  # Mean phase of all neurons in [radian]
 
   
-  def kuramato(self,period=None,lookBack=None):
+  def kuramato(self,
+               period:float=None,
+               lookback:float=None):
     """Return the phase mean of all neurons in the spike record.
 
     circmean() instead of trigonometry is used to find the mean phase of all 
@@ -530,10 +532,9 @@ class LIF_Network:
     Simulation duration has to >= period.
 
     Args: 
-      period: [count] The number of sections to split a period into.
-        If set to the None, we are assuming a period of 100ms and timesteps of 
-        0.1ms, thus yielding 1000 sections in a single cycle.
-      lookBack: [ms] The length of time we are looking back to analyze.
+      period: [ms] Time length of a single period we define the mapped-to polar
+        coordinates.
+      lookback: [ms] The length of time we are looking back to analyze.
         If set to the default `None`, we are considering the entire span of the
         spike record.
 
@@ -550,14 +551,15 @@ class LIF_Network:
     #  especially when converting to radians. Perhaps period of 100ms is adequate
     #  as it would divide 2pi into 1000 sections.
 
-
+    # Convert period and lookback from ms to euler-steps
     if period is None:
-      period=100  # 100ms for a cycle; given dt=0.1, thus 1000 sections.
-    period = period / self.dt
+      period=100  # 100ms
+    steps_in_period = period / self.dt  # Number of Euler steps in a period
+    if lookback is None:
+      lookback = self.t
+    steps_to_lookback = lookback / self.dt
 
-    if lookBack is None:
-      lookBack = self.t
-    lb = self.t - lookBack  # Analysis starting-point timestamp [ms]
+    lb = self.t - steps_to_lookback  # Analysis starting-point timestamp [ms]
 
     # Spike record
     SR = np.reshape(self.spike_record,newshape = [-1,2])
@@ -565,12 +567,12 @@ class LIF_Network:
     SRix = np.argmax(SR[:,1] >= lb)  # Index of first instance
     SR = SR[SRix:,:]
     SR = sorted(SR,key=lambda x: x[0])
-    wraps = lookBack/period          # ??? What is this for? 
+    wraps = steps_to_lookback/steps_in_period          # ??? What is this for? 
 
     N = self.n_neurons
   
     theta = np.random.normal(size=[N,])
-    phasespace = np.linspace(0,2*np.pi,int(period+1))  # Includes both ends
+    phasespace = np.linspace(0,2*np.pi,int(steps_in_period+1))  # Includes both ends
 
     held_neuron = np.min(SR[:][0])  # SR is sorted
     phase_entries = []
@@ -586,8 +588,8 @@ class LIF_Network:
         phase_entries = []
       else:
         myarm = SR[i][1]-lb    # Reframe to lookback
-        while myarm > period:  # Project onto the first period
-          myarm = myarm - period
+        while myarm > steps_in_period:  # Project onto the first period
+          myarm = myarm - steps_in_period
         myarm = phasespace[int(np.round(myarm))]
         phase_entries.append(myarm)
 
