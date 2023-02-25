@@ -552,7 +552,9 @@ class LIF_Network:
 
 
     if period is None:
-      period=100/self.dt  # 100ms for a cycle; given dt=0.1, thus 1000 sections.
+      period=100  # 100ms for a cycle; given dt=0.1, thus 1000 sections.
+    period = period / self.dt
+
     if lookBack is None:
       lookBack = self.t
     lb = self.t - lookBack  # Analysis starting-point timestamp [ms]
@@ -685,10 +687,8 @@ class LIF_Network:
       timestamp is being tracked with `self.t` and moved forward with
       `self.t += self.dt`?
     - ??? Is the "Informing post-synaptic neuron partner" backpropagation?
-
-
-
     """
+
     euler_steps = int(sim_duration/self.dt)   # Number of Euler-method steps
     euler_step_idx_start = self.t / self.dt  # Euler-step starting index
 
