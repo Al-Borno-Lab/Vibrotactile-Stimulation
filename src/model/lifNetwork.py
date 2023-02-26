@@ -32,12 +32,16 @@ class LIF_Network:
 
     Returns:
 
-    NOTES:
-    - Maxima
-
-    TODO (Tony):
-    - [ ] Revisit the parameters of STDP and understand what they are doing.
     """
+    # NOTE (Tony): ** Assumptions of the model **
+    # - k (kappa) - is the "maximal coupling strength" as defined for equation 
+    #   (4) in the paper. It is unclear that the value is from the paper, but 
+    #   from the code, the value is set to 400.
+    # - The external_coup_strength, which is max_coup_strength divided by
+    #   the arbitrary value 5 is hard-coded.
+
+    # TODO (Tony):
+    # - [ ] Revisit the parameters of STDP and understand what they are doing.
 
     # Neuron count
     self.n_neurons = n_neurons
@@ -101,7 +105,7 @@ class LIF_Network:
     self.synaptic_delay = 3                                                                 # [ms] Time for an AP to propogate from a pre- to post-synaptic neuron (default: 3 ms)
     max_coup_strength = 400                                                                 # [mS/cm^2] Maximal coupling strength; maximal conductance (Equation 4 in paper)
     self.per_neuron_coup_strength = max_coup_strength / self.n_neurons                      # [mS/cm^2] Neuron coupling strength (Network-coupling-strength / number-of-neurons)
-    self.connected_input_w_sum = np.zeros([self.n_neurons,])                                # Tracker of the connected presynaptic weight sum for each neuron (Eq 4: weight * Dirac Delta Distribution)
+    self.spiked_input_w_sums = np.zeros([self.n_neurons,])                                  # Tracker of the connected presynaptic weight sum for each neuron (Eq 4: weight * Dirac Delta Distribution)
     self.external_stim_coup_strength = max_coup_strength / 5                                # Coupling strength of input external inputs (i.e., vibrotactile stimuli); value 5 is arbitrary for a strong coupling strength.
     self.network_conn = np.zeros([self.n_neurons,self.n_neurons])                           # Neuron connection matrix: from row-th neuron to column-th neuron
     self.network_W = np.random.random(size=(self.n_neurons,self.n_neurons))                 # Neuron connection weight matrix: from row-th neuron to column-th neuron
@@ -724,26 +728,28 @@ class LIF_Network:
       # self.noise_g = ((1-self.dt) * self.noise_g + 
       #                 self.g_poisson * self.poisson_input_flag)
       # self.syn_g = ((1-self.dt) * self.syn_g + 
-      #               self.per_neuron_coup_strength * self.connected_input_w_sum)
+      #               self.per_neuron_coup_strength * self.spiked_input_w_sums)
       ## Option 2: Exponential decay ##
       self.noise_g = (self.noise_g * np.exp(-self.dt/self.syn_tau) 
                       + self.g_poisson * self.poisson_input_flag)  # Poisson conductance * poisson_input_flag makes sense because poisson_input_flag is binary outcome.
+      # >>> Original - Misunderstood the original variable `network_input` as current input into the neuron
+      # self.syn_g = (self.syn_g * np.exp(-self.dt/self.syn_tau)
+      #               + self.per_neuron_coup_strength * self.spiked_input_w_sums
+      #               + self.external_stim_coup_strength * epoch_current_input[step][:])
+      # ===
       self.syn_g = (self.syn_g * np.exp(-self.dt/self.syn_tau)
-                    + self.per_neuron_coup_strength * self.connected_input_w_sum
-                    + self.external_stim_coup_strength * epoch_current_input[step][:])
+                    + self.per_neuron_coup_strength * self.spiked_input_w_sums)
+      # <<< Fixed - Removed the misunderstood external input matrix
 
-
-      ## Reset inputs
-      self.connected_input_w_sum = np.zeros([self.n_neurons,])  # Connected presnaptic input weight sum for each neuron
-      self.w_update_flag = np.zeros([self.n_neurons,])  # Connection weight update tracker
-      dW = 0                                            # Net connection weight change per epoch
+      ## Reset variables
+      self.spiked_input_w_sums = np.zeros([self.n_neurons,])  # Weight sum of all spiked-connected presynaptic neurons
+      self.w_update_flag = np.zeros([self.n_neurons,])        # Connection weight update tracker
+      dW = 0                                                  # Net connection weight change per epoch
 
       ## Update membrane-potential, spiking-threshold
       # Dynamic membrane potential
-      self.v = self.v + self.dt * (((self.v_rest - self.v)
-                                    - (self.noise_g + self.syn_g) 
-                                    * self.v)
-                                   / self.m_tau)
+      self.v = self.v + (self.dt/self.m_tau) * ((self.v_rest - self.v)
+                                    - (self.noise_g + self.syn_g) * self.v)
       # Dynamic spiking threshold
       self.v_thr = (self.v_thr
                     + self.dt 
@@ -774,7 +780,7 @@ class LIF_Network:
       spike_t_diff = self.t - (self.t_spike2 + self.synaptic_delay)  # [n, ] array
       s_flag = 1.0 * (abs(spike_t_diff) < 0.01)  # 0.01 for floating point errors
       # Presynaptic neurons' weight sum for each neuron
-      self.connected_input_w_sum = np.matmul(s_flag,
+      self.spiked_input_w_sums = np.matmul(s_flag,
                                      self.network_W * self.network_conn)
 
       ## STDP (Spike-timing-dependent plasticity)
@@ -819,7 +825,7 @@ class LIF_Network:
       v_holder[tix] = self.v   
       gsyn_holder[tix] = self.syn_g + self.noise_g
       pois_holder[tix] = self.poisson_input_flag
-      in_holder[tix] = self.connected_input_w_sum
+      in_holder[tix] = self.spiked_input_w_sums
       dW_holder[tix] = dW
 
       # Increment Euler-step index
