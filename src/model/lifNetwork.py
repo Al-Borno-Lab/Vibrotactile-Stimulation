@@ -122,17 +122,16 @@ class LIF_Network:
 
     Update `network_W` matrix to binary values indicating the connections
     between neurons.
-
-    NOTES (Tony): 
-    - `pc` is a connectivity probability matrix randomly generated with the 
-      dimension of n_neurons * n_neurons representing the combinations of 
-      connections between the neurons.
-    - Mark the connections that are below the "probability of presynaptic
-      connection" threshold as 0
-    - Normalize to the mean conudctance of synapses.
-    - Set connections with normalized weight greater than 1 as 1; and set 
-      connections with normalized weight less than 0 as 0.
     """
+    # NOTES (Tony): 
+    # - `pc` is a connectivity probability matrix randomly generated with the 
+    #   dimension of n_neurons * n_neurons representing the combinations of 
+    #   connections between the neurons.
+    # - Mark the connections that are below the "probability of presynaptic
+    #   connection" threshold as 0
+    # - Normalize to the mean conudctance of synapses.
+    # - Set connections with normalized weight greater than 1 as 1; and set 
+    #   connections with normalized weight less than 0 as 0.
 
     pc = np.random.random(size=(self.n_neurons,self.n_neurons))  # Connectivity probability matrix
     self.network_conn = pc < self.proba_conn  # Mask - Check if the connectivity probability meets the threshold `proba_conn`
@@ -191,16 +190,16 @@ class LIF_Network:
     
   def simulate_poisson(self,):
     """Generate Poisson spike trains.
-    
-    NOTES (Tony):
-    - Poisson frequency is hardcoded as (20 * 0.001 * 0.1) = 20e-4 = 0.002 times 
-      per time interval, which is set as dt = 0.1.
-    - With rate of 2e-3, there is only probability of 2e-3 that a neuron will 
-      spike, thus multiplying the value 1 by the boolean values.
-    - Essentially the same as estimating a Poisson process with Binomial trials,
-      thus, may make more sense to just determine spiking with a Binomial random
-      variable.
     """
+    # NOTES (Tony):
+    # - Poisson frequency is hardcoded as (20 * 0.001 * 0.1) = 20e-4 = 0.002 times 
+    #   per time interval, which is set as dt = 0.1.
+    # - With rate of 2e-3, there is only probability of 2e-3 that a neuron will 
+    #   spike, thus multiplying the value 1 by the boolean values.
+    # - Essentially the same as estimating a Poisson process with Binomial trials,
+    #   thus, may make more sense to just determine spiking with a Binomial random
+    #   variable.
+    
 
     self.poisson_input_flag = 1 * (np.random.rand(self.n_neurons,) < self.poisson_freq)
   
@@ -239,30 +238,29 @@ class LIF_Network:
 
     Returns: 
       dW: Connection weight change with the time diff of time_diff.
-
-    ---
-    
-    NOTES (Tony):
-    - Nearest neighbor STDP scheme by updating the weights whenever a 
-      postsynaptic neuron spikes. 
-    - Equation (7) in the original paper; however differ in that time_diff is
-      used instead of the time_lag as stated in equation 7 of the paper.
-    - time_diff < 0 is when the presynaptic neuron spikes before the 
-      postsynaptic resulting in a potentiation (through connection weight 
-      increase) of the two neurons.
-    - time_diff > 0 is when the presynaptic neuron spikes AFTER the 
-      poststynaptic resulting in a depression (through connection weight
-      decrease) of the two neurons.
-
-    TODO (TONY): 
-    - [ ] Modulize out the part of updating the connection weight matrix and 
-      keep this method to just calculating the weight change.
-
-    QUESTIONS (Tony):
-    - ??? Why use -0.01 and 0.01 instead of zero as stated in eq.7 of the paper?
-    - ??? Why is the hard bound of [0, 1] used for the weights? (Reason not 
-      specified in the paper.)
     """
+    
+    # NOTES (Tony):
+    # - Nearest neighbor STDP scheme by updating the weights whenever a 
+    #   postsynaptic neuron spikes. 
+    # - Equation (7) in the original paper; however differ in that time_diff is
+    #   used instead of the time_lag as stated in equation 7 of the paper.
+    # - time_diff < 0 is when the presynaptic neuron spikes before the 
+    #   postsynaptic resulting in a potentiation (through connection weight 
+    #   increase) of the two neurons.
+    # - time_diff > 0 is when the presynaptic neuron spikes AFTER the 
+    #   poststynaptic resulting in a depression (through connection weight
+    #   decrease) of the two neurons.
+
+    # TODO (TONY): 
+    # - [ ] Modulize out the part of updating the connection weight matrix and 
+    #   keep this method to just calculating the weight change.
+
+    # QUESTIONS (Tony):
+    # - ??? Why use -0.01 and 0.01 instead of zero as stated in eq.7 of the paper?
+    # - ??? Why is the hard bound of [0, 1] used for the weights? (Reason not 
+    #   specified in the paper.)
+
 
     dW = 0
 
@@ -298,40 +296,40 @@ class LIF_Network:
 
     Returns:
       SR (np.ndarray): n-by-2 ndarray recording the neuron and its spike time. 
-
-
-    NOTES (Tony): 
-    - Spike record is subsetted to be loopBack onwards.
-    - Interesting way of utilizing argmax to find the first instance of 
-      timestamp matching loopBack.
-    - Spike record: first-column: The i-th neuron,
-                    second-column: Time that spiked.
-    - argmax returns the first instance of matched condition.
-    - np.where returns the indices of items with satisfied conditions if second
-      and third arguments are missing for the function.
-    - The beginning attempt to subset SR with the first instance of condition
-      match can be optimized as this only subsets partially and thus still
-      requires the if-statement in the plotting calls. (Just not optimized.)
-    - lookBack variable name can be better named as the author used the same 
-      variable for two purposes. One to specify the length to look back in time,
-      two to specify the starting point of spiketrain plotting timestamp.
-    - `result` is a list of indices in the spike_record that matches that of 
-      the specified neuron.
-    - The method starts by creating a blank canvas using `plt.plot()` with 
-      arguments such as the number of neurons and then fill in the spiketrain
-      information in subsequent code.
-
-    QUESTIONS (Tony): 
-    - ??? Why does it delete the first row of spike record?
-      - Answer: The first row was the placeholder placed by object __init__.
-        Since the `simulation` method only appends spike records to the 
-        spike_record variable, the original placeholder is still occupying the 
-        first entry of the variable.
-    - ??? Why is loopBack logic written in such convoluted way?
-      - Answer: This may just be a preference, but the code is unpythonic.
-    - ??? Why is reshaping needed if the spike_record is already in the format?
-
     """
+
+    # NOTES (Tony): 
+    # - Spike record is subsetted to be loopBack onwards.
+    # - Interesting way of utilizing argmax to find the first instance of 
+    #   timestamp matching loopBack.
+    # - Spike record: first-column: The i-th neuron,
+    #                 second-column: Time that spiked.
+    # - argmax returns the first instance of matched condition.
+    # - np.where returns the indices of items with satisfied conditions if second
+    #   and third arguments are missing for the function.
+    # - The beginning attempt to subset SR with the first instance of condition
+    #   match can be optimized as this only subsets partially and thus still
+    #   requires the if-statement in the plotting calls. (Just not optimized.)
+    # - lookBack variable name can be better named as the author used the same 
+    #   variable for two purposes. One to specify the length to look back in time,
+    #   two to specify the starting point of spiketrain plotting timestamp.
+    # - `result` is a list of indices in the spike_record that matches that of 
+    #   the specified neuron.
+    # - The method starts by creating a blank canvas using `plt.plot()` with 
+    #   arguments such as the number of neurons and then fill in the spiketrain
+    #   information in subsequent code.
+
+    # QUESTIONS (Tony): 
+    # - ??? Why does it delete the first row of spike record?
+    #   - Answer: The first row was the placeholder placed by object __init__.
+    #     Since the `simulation` method only appends spike records to the 
+    #     spike_record variable, the original placeholder is still occupying the 
+    #     first entry of the variable.
+    # - ??? Why is loopBack logic written in such convoluted way?
+    #   - Answer: This may just be a preference, but the code is unpythonic.
+    # - ??? Why is reshaping needed if the spike_record is already in the format?
+
+
     
     ## lookBack == 0 if None
     if lookBack is None:
@@ -398,71 +396,72 @@ class LIF_Network:
 
     Returns: 
       r: [radian] Magnitude of the mean Kuramato vectors of all neurons.
-
-    NOTES (Tony):
-    - The variable `lb` should be renamed as the starting point.
-    - 1000 periods if time step (dt) is 0.1 (1000 / 0.1 = 1e4)
-    - Converting the
-    - The held_neuron is a reference neuron that we are referring all other 
-      neurons to. The reference neuron is the reference frame that we compare 
-      other neurons to.
-    - The held_neuron is reset by the starting timestamp so that the held_neuron
-      is viewed in the proper reference with respect to the interval we are
-      looking back to view or plot.
-    - The held_neuron is just the neuron that we are calculating. It is set as
-      the held_neuron when a new neuron is first encountered when iterating 
-      through the sorted spike record.
-    - When held_neuron is reset to the starting timestamp, we are just changing
-      the reference frame to that of the lookBack time interval.
-    - The period of a periodic function is the value at which the function
-      repeat itself, thus we are stating that at value (100 / dt) = 1000 is when 
-      the function repeats.
-    - The case when the ix neuron IS an held_neuron, it is limiting the frame
-      to that specified by the lookBack and then projecting the entire spike
-      acitivity of that neuron onto a single period. Each of the spike would be
-      an arm on the polar coordinate thus has a radian, and this radian is 
-      recorded into the phase_entries array to be later processed.
-    - `myarm` is named because each of the spike can be projected onto the polar
-      coordinate as an arm.
-    - held_neuron is a variable that is outside of the for-loop and is reset 
-      when finished processing all the phases for the previous neuron by setting
-      to the current neuron number (i.e., ix). The phase_entries array is also
-      cleared to make room for the next neuron number.
-    - The phase medians are like each neuron's center of gravity (COG) in the 
-      polar coordinate, however, I am not sure why we are not taking the length
-      from center to the COG into the calculation.
-    - Summing the Euler's equation is equivalent to summing each of the complex
-      numbers representing the Kuramato vector denoting the mean phase of each
-      neuron. Summing each neuron's Kuramato vector and then dividing by the 
-      number of neuron becomes finding the phase mean of all the neurons.
-    - The absolute mean phase in radian is returned because at the midpoint of 
-      the period, the periodic function is just opposite of that of t=0. We do
-      not care whether the mean phase is lagging or ahead of the the periodic
-      function at t=0, thus we only care about the magnitude of the phase, hence
-      taking the absolute value of the mean phase of all neurons.
-    - The cutoff value is tuned to adjust for floating point errors when 
-      calculating the the phase angle using trigonometry. Seen below when
-      finding the phase angle [radian] using scipy's circmean, we are no longer
-      using trigonometry to find the phase angle, thus floating point errors are
-      eliminated.
-
-    QUESTIONS (Tony):
-    - SR is already in n-rows of length-2 arrays, why do we need to reshape it?
-    - Why is the time length for calculating the period variable fixed at 100ms?
-    - Why add 1 to the priod during linespace creation?
-      - Answer: Because the evenly spaced samples includes the start and 
-        endpoints. For example, if we would like 4 sections, we would need 5 
-        marking points (3x points at the center and then the two ends).
-    - What is held_neuron (smallest neuron in the spike record?)
-    - What unit is the `period` variable? I think it should be ms, but it is not
-      clear if there is even a unit.
-    - Why is the radius/hypotenus or the distance from origin to the COG only
-      filtered at the cutoff of 0.3? What is the significance of 0.3? Why not 
-      consider this distance in calculating the Kuramato vector? 
-    - ??? The `wraps` variable doesn't really make sense as it is dividing
-      lookBack of unit [ms] by period of unit [count], in addition the variable 
-      is not used nor returned, what is the point of this variable?
     """
+
+    # NOTES (Tony):
+    # - The variable `lb` should be renamed as the starting point.
+    # - 1000 periods if time step (dt) is 0.1 (1000 / 0.1 = 1e4)
+    # - Converting the
+    # - The held_neuron is a reference neuron that we are referring all other 
+    #   neurons to. The reference neuron is the reference frame that we compare 
+    #   other neurons to.
+    # - The held_neuron is reset by the starting timestamp so that the held_neuron
+    #   is viewed in the proper reference with respect to the interval we are
+    #   looking back to view or plot.
+    # - The held_neuron is just the neuron that we are calculating. It is set as
+    #   the held_neuron when a new neuron is first encountered when iterating 
+    #   through the sorted spike record.
+    # - When held_neuron is reset to the starting timestamp, we are just changing
+    #   the reference frame to that of the lookBack time interval.
+    # - The period of a periodic function is the value at which the function
+    #   repeat itself, thus we are stating that at value (100 / dt) = 1000 is when 
+    #   the function repeats.
+    # - The case when the ix neuron IS an held_neuron, it is limiting the frame
+    #   to that specified by the lookBack and then projecting the entire spike
+    #   acitivity of that neuron onto a single period. Each of the spike would be
+    #   an arm on the polar coordinate thus has a radian, and this radian is 
+    #   recorded into the phase_entries array to be later processed.
+    # - `myarm` is named because each of the spike can be projected onto the polar
+    #   coordinate as an arm.
+    # - held_neuron is a variable that is outside of the for-loop and is reset 
+    #   when finished processing all the phases for the previous neuron by setting
+    #   to the current neuron number (i.e., ix). The phase_entries array is also
+    #   cleared to make room for the next neuron number.
+    # - The phase medians are like each neuron's center of gravity (COG) in the 
+    #   polar coordinate, however, I am not sure why we are not taking the length
+    #   from center to the COG into the calculation.
+    # - Summing the Euler's equation is equivalent to summing each of the complex
+    #   numbers representing the Kuramato vector denoting the mean phase of each
+    #   neuron. Summing each neuron's Kuramato vector and then dividing by the 
+    #   number of neuron becomes finding the phase mean of all the neurons.
+    # - The absolute mean phase in radian is returned because at the midpoint of 
+    #   the period, the periodic function is just opposite of that of t=0. We do
+    #   not care whether the mean phase is lagging or ahead of the the periodic
+    #   function at t=0, thus we only care about the magnitude of the phase, hence
+    #   taking the absolute value of the mean phase of all neurons.
+    # - The cutoff value is tuned to adjust for floating point errors when 
+    #   calculating the the phase angle using trigonometry. Seen below when
+    #   finding the phase angle [radian] using scipy's circmean, we are no longer
+    #   using trigonometry to find the phase angle, thus floating point errors are
+    #   eliminated.
+
+    # QUESTIONS (Tony):
+    # - SR is already in n-rows of length-2 arrays, why do we need to reshape it?
+    # - Why is the time length for calculating the period variable fixed at 100ms?
+    # - Why add 1 to the priod during linespace creation?
+    #   - Answer: Because the evenly spaced samples includes the start and 
+    #     endpoints. For example, if we would like 4 sections, we would need 5 
+    #     marking points (3x points at the center and then the two ends).
+    # - What is held_neuron (smallest neuron in the spike record?)
+    # - What unit is the `period` variable? I think it should be ms, but it is not
+    #   clear if there is even a unit.
+    # - Why is the radius/hypotenus or the distance from origin to the COG only
+    #   filtered at the cutoff of 0.3? What is the significance of 0.3? Why not 
+    #   consider this distance in calculating the Kuramato vector? 
+    # - ??? The `wraps` variable doesn't really make sense as it is dividing
+    #   lookBack of unit [ms] by period of unit [count], in addition the variable 
+    #   is not used nor returned, what is the point of this variable?
+
 
     # Convert period and lookback from ms to euler-steps
     if period is None:
@@ -638,68 +637,68 @@ class LIF_Network:
       dW_holder (ndarray): 
         1D array of the net connection weight change of the entire network 
         at each epoch (Euler-step).
-
-    NOTES (Tony):
-    - `spike_flag` seems to be an array of n_neuron length that marks whether
-      the neuron has spiked?
-    - The `spike_flag` array marks whether the neurons fired at the specific 
-      time step being iterated through because a neuron cannot be spiking twice
-      at the same time slice (time step).
-    - `sp` is a vector masking the neurons that are ineligible for spiking.
-    - `t_spike1` and `t_spike2` are default to -10000 so that we are able to 
-      filter by timestamp, and -10000 is just an arbitrary number. It can be any
-      negative number IMO because negative timestamp does not exist and is 
-      sufficient for the purpose of filtering by timestamp.
-    - `sp` checking if the `spike_flag` is 0 seems to tell that `spike_flag` 
-      marks whether the neuron is spiking or not. If it has a value of 1, it
-      indicates that it is ineligible to spike, thus even if the membrane
-      potential passes the threshold, it still won't spike. This seems to tell
-      that if a neuron has a FALSE spike_flag, it is in an absolute refractory
-      period and thus can't spike no-matter the membrane potential.
-      - `spike_flag == 0` =?= "neuron in aboslute refractory period"
-    - Upon consideration, the only reason one needs `t_offset * f` is because
-      `spike_flag` is actually tracking whether the neuron is in abs-refractory
-      period and `f` marks the neurons that have `spike_flag == 1`.
-    - Typical abs-refractory periods are 1-2 ms, which matches the code because
-      our timesteps are dt = 0.1ms and thus it probable that multiple timesteps
-      would still be within a neuron's aboslute refractory period.
-    - [ ] Propose changing name of variable `spike_flag` to `abs_rf_flag`.
-    - When the neuron spikes, it's connection weight is also due to update due
-      to the STDP scheme. Thus, we keep track of the connections that needs to
-      be updated with the `w_update_flag`.
-    ` `f` seems similar to `sp` at first but they are drastically different for
-      the following reason.
-      - Each for loop iteration is only one timestep, thus it moves the time by
-        0.1 ms, thus there will be cases when a neuron has not spiked
-        (`sp == 0`), but still in absolute-refractory period (`spike_flag == 1`)
-        thus making the neuron unable to spike again.
-      - For the above reason, I am proposing changing the name `spike_flag` to 
-        `abs_rf_flag` as it helps with the understanding of the code.
-    - ##### I AM WRONG! `spike_flag` should be `rel_rf_flag`,              #####
-      ##### and `t_offset` should be `abs_rf_flag`.                        #####
-    - `spike_length` same as `abs_rf_time_length`, in [ms]
-    - ##### I AM WRONG AGAIN!!! `spike_flag` should be `rf_flag`           #####
-
-    TODO (Tony):
-    - [ ] Check if Delta_W method has a 0.01 threshold instead of 0 because of 
-      the 0.1 implementation in STDP below. Check the Fortran code for this.
-    - [ ] Optimize the "End of Epoch" section using the step variable of the
-      for-loop.
-
-    QUESTIONS (Tony)
-    - ??? Why was the matrix I declared twice `I = I = np.zeros([n_times, self.n_neurons])`
-    - ??? Why are the voltage thresholds of the neurons that fired (i.e., 
-      `v_thr[f]`) set to the refractory period potential (`v_rf_spike = 0`).
-        - This tells me that this is just a relative refractory period and thus 
-          it is still possible to elicit an AP, just harder because the 
-          threshold is now 0mV instead of -40mV.
-    - ??? `spike_flag == 0` =?= "neuron in aboslute refractory period"
-    - ??? Makes more sense to rename `timesteps` argument as `time` because time
-      divided by timestep (dt) would yield the number of steps. The actual
-      timestamp is being tracked with `self.t` and moved forward with
-      `self.t += self.dt`?
-    - ??? Is the "Informing post-synaptic neuron partner" backpropagation?
     """
+    # NOTES (Tony):
+    # - `spike_flag` seems to be an array of n_neuron length that marks whether
+    #   the neuron has spiked?
+    # - The `spike_flag` array marks whether the neurons fired at the specific 
+    #   time step being iterated through because a neuron cannot be spiking twice
+    #   at the same time slice (time step).
+    # - `sp` is a vector masking the neurons that are ineligible for spiking.
+    # - `t_spike1` and `t_spike2` are default to -10000 so that we are able to 
+    #   filter by timestamp, and -10000 is just an arbitrary number. It can be any
+    #   negative number IMO because negative timestamp does not exist and is 
+    #   sufficient for the purpose of filtering by timestamp.
+    # - `sp` checking if the `spike_flag` is 0 seems to tell that `spike_flag` 
+    #   marks whether the neuron is spiking or not. If it has a value of 1, it
+    #   indicates that it is ineligible to spike, thus even if the membrane
+    #   potential passes the threshold, it still won't spike. This seems to tell
+    #   that if a neuron has a FALSE spike_flag, it is in an absolute refractory
+    #   period and thus can't spike no-matter the membrane potential.
+    #   - `spike_flag == 0` =?= "neuron in aboslute refractory period"
+    # - Upon consideration, the only reason one needs `t_offset * f` is because
+    #   `spike_flag` is actually tracking whether the neuron is in abs-refractory
+    #   period and `f` marks the neurons that have `spike_flag == 1`.
+    # - Typical abs-refractory periods are 1-2 ms, which matches the code because
+    #   our timesteps are dt = 0.1ms and thus it probable that multiple timesteps
+    #   would still be within a neuron's aboslute refractory period.
+    # - [ ] Propose changing name of variable `spike_flag` to `abs_rf_flag`.
+    # - When the neuron spikes, it's connection weight is also due to update due
+    #   to the STDP scheme. Thus, we keep track of the connections that needs to
+    #   be updated with the `w_update_flag`.
+    # ` `f` seems similar to `sp` at first but they are drastically different for
+    #   the following reason.
+    #   - Each for loop iteration is only one timestep, thus it moves the time by
+    #     0.1 ms, thus there will be cases when a neuron has not spiked
+    #     (`sp == 0`), but still in absolute-refractory period (`spike_flag == 1`)
+    #     thus making the neuron unable to spike again.
+    #   - For the above reason, I am proposing changing the name `spike_flag` to 
+    #     `abs_rf_flag` as it helps with the understanding of the code.
+    # - ##### I AM WRONG! `spike_flag` should be `rel_rf_flag`,              #####
+    #   ##### and `t_offset` should be `abs_rf_flag`.                        #####
+    # - `spike_length` same as `abs_rf_time_length`, in [ms]
+    # - ##### I AM WRONG AGAIN!!! `spike_flag` should be `rf_flag`           #####
+
+    # TODO (Tony):
+    # - [ ] Check if Delta_W method has a 0.01 threshold instead of 0 because of 
+    #   the 0.1 implementation in STDP below. Check the Fortran code for this.
+    # - [ ] Optimize the "End of Epoch" section using the step variable of the
+    #   for-loop.
+
+    # QUESTIONS (Tony)
+    # - ??? Why was the matrix I declared twice `I = I = np.zeros([n_times, self.n_neurons])`
+    # - ??? Why are the voltage thresholds of the neurons that fired (i.e., 
+    #   `v_thr[f]`) set to the refractory period potential (`v_rf_spike = 0`).
+    #     - This tells me that this is just a relative refractory period and thus 
+    #       it is still possible to elicit an AP, just harder because the 
+    #       threshold is now 0mV instead of -40mV.
+    # - ??? `spike_flag == 0` =?= "neuron in aboslute refractory period"
+    # - ??? Makes more sense to rename `timesteps` argument as `time` because time
+    #   divided by timestep (dt) would yield the number of steps. The actual
+    #   timestamp is being tracked with `self.t` and moved forward with
+    #   `self.t += self.dt`?
+    # - ??? Is the "Informing post-synaptic neuron partner" backpropagation?
+    
 
     euler_steps = int(sim_duration/self.dt)   # Number of Euler-method steps
     euler_step_idx_start = self.t / self.dt  # Euler-step starting index
