@@ -611,13 +611,13 @@ class LIF_Network:
 
   def simulate(self, 
                sim_duration: float = 1, 
-               epoch_current_input: "np.NDarray" = None,
+               I_stim: "np.NDarray" = None,
                kappa: float = 8):
     """Run simulation
 
     Args: 
       sim_duration: [ms] Duration of time in milliseconds.
-      epoch_current_input (ndarray): 
+      I_stim (ndarray): 
         2D ndarray matrix denoting the current input for each neuron per each
         epoch (Euler-step); current in mA.
       kappa (float, optional): Max coupling strength of the network [mS / cm^2].
@@ -711,8 +711,8 @@ class LIF_Network:
     euler_step_idx_start = self.t / self.dt  # Euler-step starting index
 
     ## External input current matrix
-    if epoch_current_input == None:
-      epoch_current_input = np.zeros(shape = [euler_steps, self.n_neurons])
+    if I_stim == None:
+      I_stim = np.zeros(shape = [euler_steps, self.n_neurons])
 
     ## Output variable placeholders
     holder_epoch_timestamps = np.zeros((euler_steps, ))
@@ -741,13 +741,17 @@ class LIF_Network:
       dW = 0                                                  # Net connection weight change per epoch
 
       ## Update membrane-potential, spiking-threshold
-      # Dynamic membrane potential - Version 1 - Replicated from Ali's Fortran code - 
-      self.v = (self.v + (self.dt/self.tau_m) * ((self.g_leak) * (self.v_rest - self.v) 
-                                                 + (self.g_noise + self.g_syn) * (self.v_rest - self.v)))
-      # Dynamic membrane potential - Version 2 - Replicated from Ali's Fortran code - with reversal potential of Na+ (20mV) instead of v_rest=0mV
-      self.v = (self.v + (self.dt/self.tau_m) * ((self.g_leak) * (self.v_rest - self.v) 
-                                                 + (self.g_noise + self.g_syn) * (20 - self.v)))
-      
+    #   # Dynamic membrane potential - Version 1 - Replicated from Ali's Fortran code - 
+    #   self.v = (self.v + (self.dt/self.tau_m) * ((self.g_leak) * (self.v_rest - self.v) 
+    #                                              + (self.g_noise + self.g_syn) * (self.v_rest - self.v)))
+    #   # Dynamic membrane potential - Version 2 - Replicated from Ali's Fortran code - with reversal potential of Na+ (20mV) instead of v_rest=0mV
+    #   self.v = (self.v + (self.dt/self.tau_m) * ((self.g_leak) * (self.v_rest - self.v) 
+    #                                              + (self.g_noise + self.g_syn) * (20 - self.v)))
+      # Dynamic membrane potential - Version 3 - Formula from the paper
+      self.v = (self.v +
+                (self.dt/self.capacitance) * (self.g_leak * (self.v_rest - self.v) +
+                                              self.g_syn * (self.v_syn - self.v) + 
+                                              I_stim[step]))
 
       # Dynamic spiking threshold
       self.v_thr = (self.v_thr
