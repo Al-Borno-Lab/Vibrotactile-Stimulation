@@ -4,6 +4,7 @@ from scipy import stats            # ScPy is a scientific computing package. We 
 from scipy.stats import circmean
 import math
 from posixpath import join
+import numpy.typing as npt
 
 class LIF_Network:
   def __init__(self, n_neurons = 1000, dimensions = [[0,100],[0,100],[0,100]]):
@@ -75,7 +76,7 @@ class LIF_Network:
     self.spike_record = np.empty(shape=(1, 2))                                              # Tracker of Spike record recorded as a list: [neuron_number, spike_time]
     self.g_syn = np.zeros(self.n_neurons) + self.g_syn_initial_value                        # Tracker of dynamic synaptic conductance. Initial value of 0.; equation (2)
     self.g_noise = np.zeros(self.n_neurons)                                                 # Tracker of dynamic noise conductance
-    self.poisson_input_flag = np.zeros(self.n_neurons)                                      # Tracker of Input vector of external noise to each neuron
+    # self.poisson_input_flag = np.zeros(self.n_neurons)                                      # Tracker of Input vector of external noise to each neuron
     self.w_update_flag = np.zeros(self.n_neurons)                                           # Tracker of connetion weight updates. When a neuron spikes, it is flagged as needing update on its connection weight.
     self.spiked_input_w_sums = np.zeros(self.n_neurons)                                     # Tracker of the connected presynaptic weight sum for each neuron (Eq 4: weight * Dirac Delta Distribution)
     self.network_conn = np.zeros([self.n_neurons, self.n_neurons])                          # Tracker of Neuron connection matrix: from row-th neuron to column-th neuron
@@ -188,9 +189,8 @@ class LIF_Network:
     return dist
 
     
-  def simulate_poisson(self,):
-    """Generate Poisson spike flags for noise input calculation
-    """
+  def simulate_poisson(self, ):
+    """Calculate and return Poisson spike flags for noise input calculation."""
     # NOTES (Tony):
     # - Poisson frequency is hardcoded as (20 * 0.001 * 0.1) = 20e-4 = 0.002 times 
     #   per time interval, which is set as dt = 0.1.
@@ -199,12 +199,18 @@ class LIF_Network:
     # - Essentially the same as estimating a Poisson process with Binomial trials,
     #   thus, may make more sense to just determine spiking with a Binomial random
     #   variable.
-    
-
-    self.poisson_input_flag = 1 * (np.random.rand(self.n_neurons,) < self.poisson_freq)
+    poisson_noise_input_flag = 1 * (np.random.rand(self.n_neurons) < self.poisson_freq)
+    return poisson_noise_input_flag
   
-  def assaySTDP(self):
-    """Plot the STDP function curve.
+
+  def poisson_noise_input(self, ):
+    """Calculate and return the Poisson noise input current."""
+    I_noise = self.g_noise * (self.v_syn - self.v)
+    return I_noise
+
+
+  def assay_stdp(self):
+    """Plot the STDP scheme assay.
 
     Y-axis being the connection weight update (delta w).
     X-axis being the time diff of presynaptic spike timestamp less postsynaptic
@@ -215,7 +221,7 @@ class LIF_Network:
     fig = plt.figure()
 
     for i in range(-100,100,1):
-      plt.scatter(i, self.Delta_W_tau(i, 0, 0), 
+      plt.scatter(i, self.stdp_weight_update(i, 0, 0), 
                   s=2,
                   c='k')
 
@@ -225,7 +231,7 @@ class LIF_Network:
     plt.show()
     self.random_conn()
     
-  def Delta_W_tau(self, time_diff, pre_idx, post_idx):
+  def stdp_weight_update(self, time_diff, pre_idx, post_idx):
     """Update and return connection weight change in STDP scheme.
 
     Spike-timing-dependent plasticity (STDP) scheme by updating the connection
@@ -283,6 +289,7 @@ class LIF_Network:
     self.network_W[self.network_W < 0] = 0
 
     return dW
+
 
   def spikeTrain(self,lookBack=None, nNeurons = 5, purge=False):
     """Plot spiketrain plot of specified neuron counts and lookBack range.
@@ -611,7 +618,8 @@ class LIF_Network:
 
   def simulate(self, 
                sim_duration: float = 1, 
-               I_stim: "np.NDarray" = None,
+               I_stim: npt.NDArray = None,
+               external_spiked_input_w_sums: npt.NDArray = None,
                kappa: float = 8):
     """Run simulation
 
@@ -620,6 +628,10 @@ class LIF_Network:
       I_stim (ndarray): 
         2D ndarray matrix denoting the current input for each neuron per each
         epoch (Euler-step); current in mA.
+      external_spiked_input_w_sums (ndarray): 
+        [mS/cm^2] 2D ndarray matrix denoting the weight sum of spiked and  
+        connected presynaptic neurons for each neuron per epoch. Rows are for 
+        each epoch, and columns for each postsynaptic neuron.
       kappa (float, optional): Max coupling strength of the network [mS / cm^2].
         Defaults to 8.
 
@@ -710,9 +722,12 @@ class LIF_Network:
     euler_steps = int(sim_duration/self.dt)   # Number of Euler-method steps
     euler_step_idx_start = self.t / self.dt  # Euler-step starting index
 
-    ## External input current matrix
+    ## External stimulation current input matrix
     if I_stim == None:
-      I_stim = np.zeros(shape = [euler_steps, self.n_neurons])
+      I_stim = np.zeros(shape=(euler_steps, self.n_neurons))
+    # Weight sums of external spiked and connected input (conductance)
+    if external_spiked_input_w_sums == None: 
+      external_spiked_input_w_sums = np.zeros(shape=(euler_steps, self.n_neurons))
 
     ## Output variable placeholders
     holder_epoch_timestamps = np.zeros((euler_steps, ))
@@ -726,14 +741,28 @@ class LIF_Network:
     ## Euler-step Loop
     for step in range(euler_steps):  # Step-loop: because (time_duration/dt = steps OR sections)
       
-      ## Generate poisson inputs
-      self.simulate_poisson()  # Saved in `self.poisson_input_flag`
+      ## Generate Poisson noise input flags and input current
+      poisson_noise_input_flat = self.simulate_poisson()
+      I_noise = self.poisson_noise_input() * poisson_noise_input_flat
 
       ## Update Conductance (denoted g) - Integrate inputs from noise and synapses
-      ## Option 1: Non-exponential decay ##
-      # self.g_noise = ((1-self.dt) * self.g_noise + 
+    # >>>>>>>>>> Need fixing
       self.g_noise = self.g_noise * np.exp(-self.dt/self.tau_syn) 
-
+    # ==========
+    #   self.g_noise = (self.g_noise 
+    #                   + (np.exp(-self.dt/self.tau_syn) 
+    #                      * (-self.g_noise 
+    #                         +)))
+    # <<<<<<<<<< Fixing in progress
+    # >>>>>>>>>> Need fixing
+      self.syn_g = (self.syn_g * np.exp(-self.dt/self.syn_tau)
+                    + per_neuron_coup_strength * self.spiked_input_w_sums
+                    + external_stim_coup_strength * external_spiked_input_w_sums[step, :])
+    # ==========
+    # self.syn_g = (self.syn_g * np.exp(-self.dt/self.syn_tau)
+    #                 + per_neuron_coup_strength * self.spiked_input_w_sums
+    #                 + external_stim_coup_strength * external_spiked_input_w_sums[step, :])
+    # <<<<<<<<<< Fixing in progress
 
       ## Reset variables
       self.spiked_input_w_sums = np.zeros(self.n_neurons)  # Weight sum of all spiked-connected presynaptic neurons
@@ -748,10 +777,11 @@ class LIF_Network:
     #   self.v = (self.v + (self.dt/self.tau_m) * ((self.g_leak) * (self.v_rest - self.v) 
     #                                              + (self.g_noise + self.g_syn) * (20 - self.v)))
       # Dynamic membrane potential - Version 3 - Formula from the paper
-      self.v = (self.v +
-                (self.dt/self.capacitance) * (self.g_leak * (self.v_rest - self.v) +
-                                              self.g_syn * (self.v_syn - self.v) + 
-                                              I_stim[step]))
+      self.v = (self.v
+                + (self.dt/self.capacitance) * (self.g_leak * (self.v_rest - self.v)
+                                                + self.g_syn * (self.v_syn - self.v)
+                                                + I_stim[step]
+                                                + I_noise))
 
       # Dynamic spiking threshold
       self.v_thr = (self.v_thr
@@ -803,29 +833,29 @@ class LIF_Network:
                                  - self.t_spike2[post_idx])
 
                 if temporal_diff > 0:  # LTD
-                  dW = dW + self.Delta_W_tau(temporal_diff, pre_idx, post_idx)
+                  dW = dW + self.stdp_weight_update(temporal_diff, pre_idx, post_idx)
                 else:                  # LTP (temporal_diff >= 0)
                   # Addresses the case when temporal_diff = 0
                   # NOTE: t_spike1 for neurons that spiked would only differ
                   #       from t_spike2 by dt=0.1
                   temporal_diff = (self.t_spike2[pre_idx] + self.synaptic_delay 
                                    - self.t_spike1[post_idx])
-                  dW = dW + self.Delta_W_tau(temporal_diff, pre_idx, post_idx)
+                  dW = dW + self.stdp_weight_update(temporal_diff, pre_idx, post_idx)
 
               # Inform post-synaptic partners about spike (backpropagation):
               elif self.network_conn[post_idx][pre_idx] == 1:  
                 temporal_diff =  (self.t_spike2[post_idx] + self.synaptic_delay 
                                   - self.t_spike2[pre_idx])
-                dW = dW + self.Delta_W_tau(temporal_diff, post_idx, pre_idx)
-                # self.Delta_W_tau(temporal_diff, post_idx, pre_idx)
+                dW = dW + self.stdp_weight_update(temporal_diff, post_idx, pre_idx)
+                # self.stdp_weight_update(temporal_diff, post_idx, pre_idx)
 
       # End of Epoch:
       # NOTE: Used so that multiple simulation runs have continuity.
       tix = int(self.euler_step_idx - euler_step_idx_start)
       holder_epoch_timestamps[tix] = self.t
       holder_v[tix] = self.v   
-      holder_g_syn[tix] = self.g_syn + self.g_noise
-      holder_poi_noise_flags[tix] = self.poisson_input_flag
+      holder_g_syn[tix] = self.g_syn
+      holder_poi_noise_flags[tix] = poisson_noise_input_flag
       holder_spiked_input_w_sums[tix] = self.spiked_input_w_sums
       holder_dw[tix] = dW
 
