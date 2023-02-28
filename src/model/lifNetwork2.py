@@ -204,20 +204,9 @@ class LIF_Network:
     #   thus, may make more sense to just determine spiking with a Binomial random
     #   variable.
 
-    # Method #1 : Ali's code (approximating Poisson RV with Binomial RV)
-    # poisson_noise_input_flag = 1 * (np.random.rand(self.n_neurons) < self.poisson_freq)
-
-    # Method #2: Poisson implementation
-    # NOTE (Tony): With poisson frequency being so small, most of the values are 1
-    poisson_noise_input_flag = np.random.poisson(lam=self.poisson_freq, size=self.n_neurons)
+    poisson_noise_input_flag = 1 * (np.random.rand(self.n_neurons) < self.poisson_freq)
 
     return poisson_noise_input_flag
-  
-
-  def poisson_noise_input(self, ):
-    """Calculate and return the Poisson noise input current."""
-    I_noise = self.g_noise * (self.v_syn - self.v)
-    return I_noise
 
 
   def assay_stdp(self):
@@ -631,7 +620,8 @@ class LIF_Network:
                sim_duration: float = 1, 
                I_stim: npt.NDArray = None,
                external_spiked_input_w_sums: npt.NDArray = None,
-               kappa: float = 8):
+               kappa: float = 8,
+               kappa_noise: float = 0.026):
     """Run simulation
 
     Args: 
@@ -645,6 +635,8 @@ class LIF_Network:
         each epoch, and columns for each postsynaptic neuron.
       kappa (float, optional): Max coupling strength of the network [mS / cm^2].
         Defaults to 8.
+      kappa_noise (float, optional): Scales noise intensity [mS / cm^2]. 
+        Defaults to 0.026.
 
     Returns: 
       holder_v (ndarray): 
@@ -753,50 +745,56 @@ class LIF_Network:
     for step in range(euler_steps):  # Step-loop: because (time_duration/dt = steps OR sections)
       
       ## Generate Poisson noise input flags and input current
-      poisson_noise_input_flag = self.simulate_poisson()
-      I_noise = self.poisson_noise_input() * poisson_noise_input_flag
+      poisson_noise_spike_flag = self.simulate_poisson()
+      poisson_noise_spiked_input_count = np.matmul(poisson_noise_spike_flag, self.network_conn)
 
-      ## Update Conductance (denoted g) - Integrate inputs from noise and synapses
-    # <<<<<<< Need fixing
-      self.g_noise = self.g_noise * np.exp(-self.dt/self.tau_syn) 
-    # =======
-    #   self.g_noise = (self.g_noise 
-    #                   + (np.exp(-self.dt/self.tau_syn) 
-    #                      * (-self.g_noise 
-    #                         +)))
-    # >>>>>>> Fixing in progress
-    # <<<<<<< Need fixing
-      self.syn_g = (self.syn_g * np.exp(-self.dt/self.syn_tau)
-                    + per_neuron_coup_strength * self.spiked_input_w_sums
-                    + external_stim_coup_strength * external_spiked_input_w_sums[step, :])
-    # =======
-    # self.syn_g = (self.syn_g * np.exp(-self.dt/self.syn_tau)
-    #                 + per_neuron_coup_strength * self.spiked_input_w_sums
-    #                 + external_stim_coup_strength * external_spiked_input_w_sums[step, :])
-    # >>>>>>> Fixing in progress
+      # Update Conductance (denoted g) - Integrate inputs from noise and synapses
+      # # Method 1: Original method from Fortran code
+      # self.g_noise = self.g_noise * np.exp(-self.dt/self.tau_syn) 
+      # Method 2: According to the paper's equations (equation 6)
+      del_g_noise = (-self.g_noise 
+                     + kappa_noise * self.tau_syn * poisson_noise_spiked_input_count) * np.exp(-self.dt/self.tau_syn)
+      self.g_noise = (self.g_noise + del_g_noise)
+    
+      # # Method 1: Original method from Fortran code
+      # self.syn_g = (self.syn_g * np.exp(-self.dt/self.syn_tau)
+      #               + per_neuron_coup_strength * self.spiked_input_w_sums
+      #               + external_stim_coup_strength * external_spiked_input_w_sums[step, :]
+      #               )
+      # Method 2: According to the paper's equation (equation 4)
+      del_g_syn = (-self.g_syn 
+                   + kappa/self.n_neurons * self.tau_syn * self.spiked_input_w_sums 
+                   + external_stim_coup_strength * external_spiked_input_w_sums[step, :]) * np.exp(-self.dt/self.tau_syn) 
+      self.syn_g = (self.g_syn + del_g_syn)
+    
 
       ## Reset variables
-      self.spiked_input_w_sums = np.zeros(self.n_neurons)  # Weight sum of all spiked-connected presynaptic neurons
-      self.w_update_flag = np.zeros(self.n_neurons)        # Connection weight update tracker
+      self.spiked_input_w_sums = np.zeros(self.n_neurons)     # Weight sum of all spiked-connected presynaptic neurons
+      self.w_update_flag = np.zeros(self.n_neurons)           # Connection weight update tracker
       dW = 0                                                  # Net connection weight change per epoch
 
       ## Update membrane-potential, spiking-threshold
-    #   # Dynamic membrane potential - Version 1 - Replicated from Ali's Fortran code - 
-    #   self.v = (self.v + (self.dt/self.tau_m) * ((self.g_leak) * (self.v_rest - self.v) 
-    #                                              + (self.g_noise + self.g_syn) * (self.v_rest - self.v)))
-    #   # Dynamic membrane potential - Version 2 - Replicated from Ali's Fortran code - with reversal potential of Na+ (20mV) instead of v_rest=0mV
-    #   self.v = (self.v + (self.dt/self.tau_m) * ((self.g_leak) * (self.v_rest - self.v) 
-    #                                              + (self.g_noise + self.g_syn) * (20 - self.v)))
-      # Dynamic membrane potential - Version 3 - Formula from the paper
-      self.v = (self.v
-                + (self.dt/self.capacitance) * (self.g_leak * (self.v_rest - self.v)
-                                                + self.g_syn * (self.v_syn - self.v)
-                                                + I_stim[step]
-                                                + I_noise))
+      # # Dynamic membrane potential - Version 1 - Replicated from Ali's Fortran code - 
+      # self.v = (self.v + (self.dt/self.tau_m) * ((self.g_leak) * (self.v_rest - self.v) 
+      #                                            + (self.g_noise + self.g_syn) * (self.v_rest - self.v)))
+      # # Dynamic membrane potential - Version 2 - Replicated from Ali's Fortran code - with reversal potential of Na+ (20mV) instead of v_rest=0mV
+      # self.v = (self.v + (self.dt/self.tau_m) * ((self.g_leak) * (self.v_rest - self.v) 
+      #                                            + (self.g_noise + self.g_syn) * (20 - self.v)))
+      # Dynamic membrane potential - Version 3 - Formula from the paper (equation 2)
+      I_noise = self.g_noise * (self.v_syn - self.v)
+      del_v = (self.g_leak * (self.v_reset - self.v)
+               + self.g_syn * (self.v_syn - self.v)
+               + I_stim[step] 
+               + I_noise) * (self.dt / self.capacitance)
+      self.v = (self.v + del_v)
 
       # Dynamic spiking threshold
-      self.v_thr = (self.v_thr
-                    + (self.dt/self.tau_rf_thr) * (self.v_thr_rest-self.v_thr))
+      # # Method 1: From Ali's Fortran code
+      # self.v_thr = (self.v_thr
+      #         + (self.dt/self.tau_rf_thr) * (self.v_thr_rest-self.v_thr))
+      # Method 2: Paper's formula (equation 3) - This also implements the exponential decay as that in other Euler Scheme formulas
+      del_v_thr = (self.v_thr_rest - self.v_thr) * np.exp(-self.dt/self.tau_rf_thr)
+      self.v_thr = (self.v_thr + del_v_thr)
 
       ## Depolarizing to meet spiking-threshold
       spike = ((self.v >= self.v_thr) *  # Met dynamic spiking threshold
@@ -866,7 +864,7 @@ class LIF_Network:
       holder_epoch_timestamps[tix] = self.t
       holder_v[tix] = self.v   
       holder_g_syn[tix] = self.g_syn
-      holder_poi_noise_flags[tix] = poisson_noise_input_flag
+      holder_poi_noise_flags[tix] = poisson_noise_spike_flag
       holder_spiked_input_w_sums[tix] = self.spiked_input_w_sums
       holder_dw[tix] = dW
 
