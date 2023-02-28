@@ -128,13 +128,13 @@ class LIF_Network:
     #   connections with normalized weight less than 0 as 0.
 
     pc = np.random.random(size=(self.n_neurons,self.n_neurons))  # Connectivity probability matrix
-    self.network_conn = pc < self.proba_conn  # Mask - Check if the connectivity probability meets the threshold `proba_conn`
+    self.network_conn = pc < proba_conn  # Mask - Check if the connectivity probability meets the threshold `proba_conn`
     self.network_W = np.random.random(size=(self.n_neurons,self.n_neurons))  # Connectivity weight matrix
     # == FALSE; mark connections lower than probability of presynaptic connection as 0
     self.network_W[self.network_conn == 0] = 0
     # Normalized to mean conductance (i.e., `mean_w`)
     self.network_W = (self.network_W * 
-                      (self.mean_w / np.mean(self.network_W[self.network_W > 0])))          
+                      (mean_w / np.mean(self.network_W[self.network_W > 0])))          
     self.network_W[self.network_W > 1] = 1
     self.network_W[self.network_W < 0] = 0
 
@@ -187,7 +187,7 @@ class LIF_Network:
     ## Tony - Verify that this block below is indeed not needed.
     # self.network_W = np.random.random(size=(self.n_neurons,self.n_neurons))
     # self.network_W[self.network_conn == 0] = 0
-    # self.network_W = self.network_W/np.mean(self.network_W[self.network_W > 0]) * self.mean_w
+    # self.network_W = self.network_W/np.mean(self.network_W[self.network_W > 0]) * mean_w
     # self.network_W[self.network_W > 1] = 1
     # self.network_W[self.network_W < 0] = 0
     return dist
