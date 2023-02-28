@@ -199,7 +199,14 @@ class LIF_Network:
     # - Essentially the same as estimating a Poisson process with Binomial trials,
     #   thus, may make more sense to just determine spiking with a Binomial random
     #   variable.
-    poisson_noise_input_flag = 1 * (np.random.rand(self.n_neurons) < self.poisson_freq)
+
+    # Method #1 : Ali's code (approximating Poisson RV with Binomial RV)
+    # poisson_noise_input_flag = 1 * (np.random.rand(self.n_neurons) < self.poisson_freq)
+
+    # Method #2: Poisson implementation
+    # NOTE (Tony): With poisson frequency being so small, most of the values are 1
+    poisson_noise_input_flag = np.random.poisson(lam=self.poisson_freq, size=self.n_neurons)
+    
     return poisson_noise_input_flag
   
 
@@ -742,27 +749,27 @@ class LIF_Network:
     for step in range(euler_steps):  # Step-loop: because (time_duration/dt = steps OR sections)
       
       ## Generate Poisson noise input flags and input current
-      poisson_noise_input_flat = self.simulate_poisson()
-      I_noise = self.poisson_noise_input() * poisson_noise_input_flat
+      poisson_noise_input_flag = self.simulate_poisson()
+      I_noise = self.poisson_noise_input() * poisson_noise_input_flag
 
       ## Update Conductance (denoted g) - Integrate inputs from noise and synapses
-    # >>>>>>>>>> Need fixing
+    # <<<<<<< Need fixing
       self.g_noise = self.g_noise * np.exp(-self.dt/self.tau_syn) 
-    # ==========
+    # =======
     #   self.g_noise = (self.g_noise 
     #                   + (np.exp(-self.dt/self.tau_syn) 
     #                      * (-self.g_noise 
     #                         +)))
-    # <<<<<<<<<< Fixing in progress
-    # >>>>>>>>>> Need fixing
+    # >>>>>>> Fixing in progress
+    # <<<<<<< Need fixing
       self.syn_g = (self.syn_g * np.exp(-self.dt/self.syn_tau)
                     + per_neuron_coup_strength * self.spiked_input_w_sums
                     + external_stim_coup_strength * external_spiked_input_w_sums[step, :])
-    # ==========
+    # =======
     # self.syn_g = (self.syn_g * np.exp(-self.dt/self.syn_tau)
     #                 + per_neuron_coup_strength * self.spiked_input_w_sums
     #                 + external_stim_coup_strength * external_spiked_input_w_sums[step, :])
-    # <<<<<<<<<< Fixing in progress
+    # >>>>>>> Fixing in progress
 
       ## Reset variables
       self.spiked_input_w_sums = np.zeros(self.n_neurons)  # Weight sum of all spiked-connected presynaptic neurons
