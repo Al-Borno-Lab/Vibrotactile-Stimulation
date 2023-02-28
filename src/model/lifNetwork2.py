@@ -28,6 +28,10 @@ class LIF_Network:
     #   the initial value was set to 0mV or -40mV. However, it seems like from
     #   Ali's code, the initial value is -40mV.
     # - tau_spike was mentioned in the paper, but the value wasn't.
+    # - Poisson noise distribution was using binomial distribution estimation, 
+    #   which would break down as the poisson frequency increases, or when n is 
+    #   small. Changed the implementation to actual Poisson distribution for 
+    #   robustness.
 
     # Neuron count
     self.n_neurons = n_neurons
@@ -206,7 +210,7 @@ class LIF_Network:
     # Method #2: Poisson implementation
     # NOTE (Tony): With poisson frequency being so small, most of the values are 1
     poisson_noise_input_flag = np.random.poisson(lam=self.poisson_freq, size=self.n_neurons)
-    
+
     return poisson_noise_input_flag
   
 
