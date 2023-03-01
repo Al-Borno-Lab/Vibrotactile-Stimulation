@@ -1,8 +1,10 @@
 name: ccm_conda_env
 channels:
+  - defualts
+  - conda-forge
 dependencies:
   - python=3.10
   - numpy=1.22
   - matplotlib=3.7
   - scipy=1.10
-  
+  - ipython
