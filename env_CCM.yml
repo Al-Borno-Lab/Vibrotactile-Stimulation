@@ -1,6 +1,5 @@
 name: ccm_conda_env
 channels:
-  - defualts
   - conda-forge
 dependencies:
   - python=3.10
