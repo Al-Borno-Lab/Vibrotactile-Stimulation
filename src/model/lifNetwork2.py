@@ -800,7 +800,7 @@ class LIF_Network:
       del_v = (self.g_leak * (self.v_reset - self.v)
                + self.g_syn * (self.v_syn - self.v)
                + I_stim[step] 
-               + I_noise) * (self.dt / self.capacitance)
+               + I_noise) * (self.dt / self.tau_m)
       self.v = (self.v + del_v)
 
       # Dynamic spiking threshold
