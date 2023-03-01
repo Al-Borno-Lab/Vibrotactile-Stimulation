@@ -744,18 +744,32 @@ class LIF_Network:
     ## Euler-step Loop
     for step in range(euler_steps):  # Step-loop: because (time_duration/dt = steps OR sections)
       
+      # <<<<<<< DEBUG (Original noise generation)
       ## Generate Poisson noise input flags and input current
-      poisson_noise_spike_flag = self.simulate_poisson()
-      poisson_noise_spiked_input_count = np.matmul(poisson_noise_spike_flag, self.network_conn)
+      # poisson_noise_spike_flag = self.simulate_poisson()
+      # poisson_noise_spiked_input_count = np.matmul(poisson_noise_spike_flag, self.network_conn)
 
       # Update Conductance (denoted g) - Integrate inputs from noise and synapses
       # # Method 1: Original method from Fortran code
-      # self.g_noise = self.g_noise * np.exp(-self.dt/self.tau_syn) 
+      self.g_noise = self.g_noise * np.exp(-self.dt/self.tau_syn) 
       # Method 2: According to the paper's equations (equation 6)
-      del_g_noise = (-self.g_noise 
-                     + kappa_noise * self.tau_syn * poisson_noise_spiked_input_count) * np.exp(-self.dt/self.tau_syn)
-      self.g_noise = (self.g_noise + del_g_noise)
-    
+      # del_g_noise = (-self.g_noise 
+      #                + kappa_noise * self.tau_syn * poisson_noise_spiked_input_count) * np.exp(-self.dt/self.tau_syn)
+      # self.g_noise = (self.g_noise + del_g_noise)
+      # =======
+      # ## Generate Poisson noise input flags and input current
+      # poisson_noise_spike_flag = self.simulate_poisson()
+      # poisson_noise_spiked_input_count = np.matmul(poisson_noise_spike_flag, self.network_conn)
+
+      # # Update Conductance (denoted g) - Integrate inputs from noise and synapses
+      # # # Method 1: Original method from Fortran code
+      # # self.g_noise = self.g_noise * np.exp(-self.dt/self.tau_syn) 
+      # # Method 2: According to the paper's equations (equation 6)
+      # del_g_noise = (-self.g_noise 
+      #                + kappa_noise * self.tau_syn * poisson_noise_spiked_input_count) * np.exp(-self.dt/self.tau_syn)
+      # self.g_noise = (self.g_noise + del_g_noise)
+      # >>>>>>> DEBUG (Poisson Noise generation)
+
       # # Method 1: Original method from Fortran code
       # self.syn_g = (self.syn_g * np.exp(-self.dt/self.syn_tau)
       #               + per_neuron_coup_strength * self.spiked_input_w_sums
