@@ -751,7 +751,7 @@ class LIF_Network:
 
       # Update Conductance (denoted g) - Integrate inputs from noise and synapses
       # # Method 1: Original method from Fortran code
-      self.g_noise = self.g_noise * np.exp(-self.dt/self.tau_syn) 
+      self.noise_g = self.noise_g * np.exp(-self.dt/self.syn_tau) + self.g_poisson * poisson_noise_spike_flag
       # Method 2: According to the paper's equations (equation 6)
       # del_g_noise = (-self.g_noise 
       #                + kappa_noise * self.tau_syn * poisson_noise_spiked_input_count) * np.exp(-self.dt/self.tau_syn)
