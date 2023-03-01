@@ -746,7 +746,7 @@ class LIF_Network:
       
       # <<<<<<< DEBUG (Original noise generation)
       ## Generate Poisson noise input flags and input current
-      # poisson_noise_spike_flag = self.simulate_poisson()
+      poisson_noise_spike_flag = self.simulate_poisson()
       # poisson_noise_spiked_input_count = np.matmul(poisson_noise_spike_flag, self.network_conn)
 
       # Update Conductance (denoted g) - Integrate inputs from noise and synapses
