@@ -33,6 +33,7 @@ class LIF_Network:
     #   which would break down as the poisson frequency increases, or when n is 
     #   small. Changed the implementation to actual Poisson distribution for 
     #   robustness.
+    # - g_leak in Ali's code is 10, but paper states 0.02
 
     # Neuron count
     self.n_neurons = n_neurons
@@ -51,15 +52,17 @@ class LIF_Network:
 
     # Electrophysiology values
     self.v = np.random.uniform(low=-10, high=10, size=(self.n_neurons,)) - 45               # [mV] Current membrane potential - Initialized with Unif(-55, -35)
+    self.v_paper = np.random.uniform(low=-38, high=-40, size=(self.n_neurons,))
     self.v_rest = -38                                                                       # [mV] Resting voltage, equilibrium voltage. Default: -38 mV
     self.v_thr = np.zeros(self.n_neurons) - 40                                              # [mV] Reversal potential for spiking; equation (3)
-    self.v_thr_rest =  - 40                                                                 # [mV] Reversal potential for spiking during refractory period. Defaults to -40mV; equation (3).
-    self.v_spike = 20                                                                       # [mV] The voltage that spikes rise to ((AP Peak))
+    self.v_thr_rest = np.zeros(self.n_neurons) - 40                                         # [mV] Reversal potential for spiking during refractory period. Defaults to -40mV; equation (3).
+    self.v_spike = 20      # This value Ali used in his code, not seen in paper                                                                 # [mV] The voltage that spikes rise to ((AP Peak))
     self.v_syn = 0                                                                          # [mV] Reversal potential; equation (2) in paper
     self.tau_syn = 1                                                                        # [ms] Synaptic time-constant; equation (4) in paper
     self.tau_rf_thr = 5                                                                     # [ms] Timescale tau between refractory and normal thresholds relaxation period
     self.tau_spike = 1                                                                      # [ms] Time for an AP spike, also the length of the absolute refractory period
-    self.g_leak = 0.02                                                                      # [mS/cm^2] Conductance of the leak channels; equation (2) in paper
+    self.g_leak = 10                                                                        # [mS/cm^2] Conductance of the leak channels; equation (2) in paper
+    self.g_leak_ali = 0.02  # The value Ali used in his code
     self.g_syn_initial_value = 0                                                            # [mS/cm^2] Initial value of synaptic conductance; equation (2) in paper
     # Connectivity parameters (connection weight = conductance)
     self.synaptic_delay = 3                                                                 # [ms] Synaptic transmission delay from soma to soma (default: 3 ms), equation (4) in paper
@@ -72,7 +75,7 @@ class LIF_Network:
 
     # Input noise of Poisson distribution (input is generated with I = G*V)
     self.g_poisson = 1.3                                                                    # [mS/cm^2] Conductance of the extrinsic poisson inputs
-    self.poisson_freq = (20 * 0.001) * self.dt                                              # [count] Poisson input frequency (2e-3 times [per time-interval [dt = 0.1 ms]])
+    self.poisson_noise_spike_flag = np.zeros(self.n_neurons)
 
     # Internal Trackers
     self.spike_flag = np.zeros(self.n_neurons)                                              # Tracker of whether a neuron spiked
@@ -84,6 +87,7 @@ class LIF_Network:
     # self.poisson_input_flag = np.zeros(self.n_neurons)                                      # Tracker of Input vector of external noise to each neuron
     self.w_update_flag = np.zeros(self.n_neurons)                                           # Tracker of connetion weight updates. When a neuron spikes, it is flagged as needing update on its connection weight.
     self.spiked_input_w_sums = np.zeros(self.n_neurons)                                     # Tracker of the connected presynaptic weight sum for each neuron (Eq 4: weight * Dirac Delta Distribution)
+    self.dW = 0                                                                             # Tracker of change of weight used by `run_stdp_on_all_connected_pairs()`
     self.network_conn = np.zeros([self.n_neurons, self.n_neurons])                          # Tracker of Neuron connection matrix: from row-th neuron to column-th neuron
     self.network_W = np.random.random(size=(self.n_neurons, self.n_neurons))                # Tracker of Neuron connection weight matrix: from row-th neuron to column-th neuron
 
@@ -194,20 +198,29 @@ class LIF_Network:
     return dist
 
     
-  def simulate_poisson(self, ):
-    """Calculate and return Poisson spike flags for noise input calculation."""
-    # NOTES (Tony):
-    # - Poisson frequency is hardcoded as (20 * 0.001 * 0.1) = 20e-4 = 0.002 times 
-    #   per time interval, which is set as dt = 0.1.
-    # - With rate of 2e-3, there is only probability of 2e-3 that a neuron will 
-    #   spike, thus multiplying the value 1 by the boolean values.
-    # - Essentially the same as estimating a Poisson process with Binomial trials,
-    #   thus, may make more sense to just determine spiking with a Binomial random
-    #   variable.
+  def simulate_poisson(self, 
+                       poisson_noise_lambda_hz: int = 20) -> None:
+    """Calculate and update Poisson spike flags for noise input calculation.
+    
+    The returned NDArray has dimension of 1xn_neurons, with each element
+    corresponding to all possible presynaptic neurons of a postsynaptic neuron.
+    The returned binary flag indiates whether the presynaptic neuron has spiked
+    according to a Poisson distribution.
 
-    poisson_noise_input_flag = 1 * (np.random.rand(self.n_neurons) < self.poisson_freq)
+    Args: 
+      poisson_noise_lambda_hz (int, optional): [Hz] The rate of Poisson 
+        distributed noise spiking. Defaults: 20 [Hz].
+    """
+    # Binom dist p value calculation - Based on suupplied Poisson dist lambda
+    poisson_noise_lambda_kilohz = poisson_noise_lambda_hz/1000  # [Kilo-Hertz] 1 Hz = 0.001 KHz
+    n_per_time_interval = 1/self.dt  # [count] n = 1ms / dt (because time interval is 1ms)
+    binom_proba_poisson_approx = poisson_noise_lambda_kilohz / n_per_time_interval  # Binom Probability = Poisson Lambda / n
 
-    return poisson_noise_input_flag
+    # Generate Poisson noise spike flags
+    poisson_noise_input_flag = (np.random.rand(self.n_neurons) < binom_proba_poisson_approx)
+    poisson_noise_input_flag = poisson_noise_input_flag * 1  # Convert bool to binary
+
+    self.poisson_noise_input_flag = poisson_noise_input_flag
 
 
   def assay_stdp(self):
@@ -617,12 +630,231 @@ class LIF_Network:
     return r
 
 
+  def update_g_noise(self, 
+                     kappa_noise: float, 
+                     method:str = "Ali") -> None:
+    """Run the Dynamic noise conductance update function.
+
+    Args:
+        kappa_noise (float): _description_
+        method (str, optional): _description_. Defaults to "Ali".
+    """
+    # Generate Poisson noise
+    self.simulate_poisson()
+    poisson_noise_spiked_input_count = np.matmul(self.poisson_noise_spike_flag, self.network_conn)
+
+    # Update Conductance (denoted g) - Integrate inputs from noise and synapses (Equation 6 from paper)
+    if (method=="Tony"):
+      ########## TONY ##########
+      del_g_noise = (-self.g_noise 
+                     + kappa_noise * self.tau_syn * poisson_noise_spiked_input_count) * np.exp(-self.dt/self.tau_syn)
+      self.g_noise = (self.g_noise + del_g_noise)
+    elif (method=="Ali"):
+      ########## ALI ##########
+      self.g_noise = (self.g_noise * np.exp(-self.dt/self.tau_syn) 
+                      + self.g_poisson * self.poisson_noise_spike_flag)  # Poisson conductance * poisson_input_flag makes sense because poisson_input_flag is binary outcome.
+      
+
+  def update_g_syn(self, 
+                   step: int,
+                   kappa: float, 
+                   external_spiked_input_w_sums, 
+                   method:str = "Ali") -> None: 
+    """Run the Dynamic synaptic conductance update function.
+
+    Args:
+        step (int): _description_
+        kappa (float): _description_
+        external_spiked_input_w_sums (_type_): _description_
+        method (str, optional): _description_. Defaults to "Ali".
+    """
+    
+    if (method=="Tony"):
+      # Set variables
+      per_neuron_coup_strength = kappa / self.n_neurons # [mS/cm^2] Neuron coupling strength (Network-coupling-strength / number-of-neurons)
+      external_stim_coup_strength = kappa / 5  # Coupling strength of input external inputs (i.e., vibrotactile stimuli); value 5 is arbitrary for a strong coupling strength.
+      del_g_syn = (-self.g_syn 
+                   + per_neuron_coup_strength * self.tau_syn * self.spiked_input_w_sums 
+                   + external_stim_coup_strength * external_spiked_input_w_sums[step, :]) * np.exp(-self.dt/self.tau_syn) 
+      self.g_syn = (self.g_syn + del_g_syn)
+    elif (method=="Ali"):
+      self.g_syn = (self.g_syn * np.exp(-self.dt/self.tau_syn)
+              + kappa/self.n_neurons * self.spiked_input_w_sums)
+      
+
+  def update_v(self, 
+               step: int, 
+               euler_steps: int,
+               I_stim: npt.NDArray,
+               method:str="Ali",
+               capacitance_method:str="Ali") -> None: 
+    """Run the dynamic membrane potential update function.
+
+    Args:
+        step (int): _description_
+        euler_steps (int): _description_
+        I_stim (npt.NDArray): _description_
+        method (str, optional): _description_. Defaults to "Ali".
+        capacitance_method (str, optional): _description_. Defaults to "Ali".
+    """
+
+    # External stimulation current input matrix
+    if I_stim == None:
+      I_stim = np.zeros(shape=(euler_steps, self.n_neurons))
+
+    # Variable value to use depending on Ali or the Paper's implementation
+    if (capacitance_method == "Ali"):
+      # NOTE: This is how Ali have his code. The tau_m variable doesn't really make sense.
+      #   Discussed with Jesse and can't quite figure it out.
+      capa_rv = self.tau_m        # What Ali used, much fewer network weight updates thus runs much faster  >>>> Jesse recommends Tony to look into STN firing frequency to validate which one to use for PD's STN.
+      g_leak = 0.02
+    elif capacitance_method == "Paper":
+      # NOTE: This is how the variable is defined in the paper (equation 2)
+      capa_rv = self.capacitance  # What the paper stated, many more network updates and runs VERY SLOW!
+      g_leak = 10
+
+    # Different ways to update membrane potential
+    if method == "Tony":
+      I_noise = self.g_noise * (self.v_syn - self.v)
+      del_v = (g_leak * (self.v_rest - self.v)
+               + self.g_syn * (self.v_syn - self.v)
+               + I_stim[step, :] 
+               + I_noise) * (self.dt / capa_rv)
+      self.v = (self.v + del_v)
+    elif method == "Matteo":
+      # NOTE: This code is erroneous, may be the reason why Matteo's result is not reproducing Ali's.
+      self.v = self.v + (self.dt/capa_rv) * ((self.v_rest - self.v)
+                              - (self.g_noise + self.g_syn) * self.v)
+    elif method == "Ali":
+      # NOTE: Confusing, but this fits the paper equation, just without I_stim and I_noise
+      # NOTE: Ali eliminated v_rest=0mV and just mvoed the negative sign up the product.
+      self.v = self.v + (self.dt/capa_rv) * (g_leak * (self.v_rest - self.v)
+                              - (self.g_noise + self.g_syn) * self.v)
+    elif method == "Ali_Na_rev_potential":
+      # NOTE: This method was suggested by Jesse when on call discussing about the validity of the function.
+      na_rev_potential = 20  # 20 mV
+      self.v = (self.v + (self.dt/capa_rv) * (g_leak * (self.v_rest - self.v) 
+                                                + (self.g_noise + self.g_syn) * (na_rev_potential - self.v)))
+
+
+  def update_thr(self, 
+                 method:str="Ali") -> None:
+    """Run the dynamic spike threshold computation.
+
+    Args:
+        method (str, optional): _description_. Defaults to "Ali".
+    """
+    # Determine method of dyanmic threshold update implementation
+    if method=="Tony":
+      del_v_thr = (self.v_thr_rest - self.v_thr) * np.exp(-self.dt/self.tau_rf_thr)
+      self.v_thr = (self.v_thr + del_v_thr)
+    elif method=="Ali":
+      self.v_thr = (self.v_thr + self.dt * (self.v_thr_rest - self.v_thr) / self.tau_rf_thr)
+
+
+  def check_if_spike(self) -> None:
+    """Check if neurons spike, and mark them as needing to update connection weight.
+    """
+    spike = ((self.v >= self.v_thr) *   # Met dynamic spiking threshold
+              (self.spike_flag == 0))   # Not in abs_refractory period because not recently spiked
+    
+    self.spike_flag[spike] = 1                   # Mark them as SPIKED!
+    self.w_update_flag[spike] = 1                # Mark them as "Needing to update weight"
+    
+    ## Keep track of spike times
+    self.t_spike1[spike] = self.t_spike2[spike]  # Moves the t_spike2 array into t_spike1 for placeholding
+    self.t_spike2[spike] = self.t                # t_spike2 keeps track of each neuron's most recent spike's timestamp
+
+
+  def spiking(self) -> None:
+    """Simulate the spiking stage with a rectangular spike shape of v_spike for tau_spike ms.
+
+    The paper assumes and uses a rectangular spike shape, however, this only 
+    happens if we are voltage gating instead of spiking due to current input.
+
+    ??? When a postsynaptic neuron spike, is the input from the presynaptic neuron
+    more like a voltage clamp or more like a current? The former would make sense
+    for neurons live in a high resistance extracellular space, however, the latter
+    is more analogous to neurotransmitter transmitting signal from neuron to
+    neuron.
+    """
+    # TODO (Tony): Check literature if STN neurons are more similar to voltage
+    #  or current input (neurotransmitters).
+
+    # Depolarization phase
+    spiked = (self.spike_flag == 1)
+    self.v[spiked] = self.v_spike         # Rectangle spike shape by setting voltage to V_spike for duration of tau_spike (equation 3)
+    self.v_thr[spiked] = self.v_rf_spike  # Threshold is reset to V_th_spike=0mV right after spiking (equation 3)
+
+    # Hyperpolarization phase
+    in_abs_rf_period = (self.t_spike2 + self.tau_spike) > self.t
+    self.v[(~in_abs_rf_period) * spiked] = self.v_reset  # Rectangular spike end resets potential to -67mV
+    
+    # Reset spike flag tracker
+    self.spike_flag[(~in_abs_rf_period) * spiked] = 0
+
+  def check_presynaptic_spike_arrival(self) -> None:
+    """Checking and updating if spike from presynaptic neurons have arrived.
+
+    This aligns with the Dirac Delta Distribution in equation 4 of the paper.
+    The intent to to check if the last spiking time plus synaptic delay (time
+    it takes a signal to propagate from the presynaptic neuron's soma to the
+    postsynaptic neuron's soma.)
+
+    If so, we then sum up the pre-post weights of all the CONNECTED and 
+    SPIKES THAT HAVE ARRIVED [at postsynaptic soma] for each postsynaptic neuron
+    and this value is used to update the synaptic conductance.
+    """
+    ## Dirac Delta Distribution (equation 4 in paper)
+    spike_t_diff = self.t - (self.t_spike2 + self.synaptic_delay)  # [n, ] array
+    s_flag = 1.0 * (abs(spike_t_diff) < 0.01)  # 0.01 for floating point errors
+
+    # Presynaptic neurons' weight sum for each neuron
+    self.spiked_input_w_sums = np.matmul(s_flag,
+                                  self.network_W * self.network_conn)
+
+  def run_stdp_on_all_connected_pairs(self, )-> None:
+    ## STDP (Spike-timing-dependent plasticity)
+    ## Note: Iterates over all pairs of connections using double-nested loops
+    if self.w_update_flag.any():
+      for pre_idx in range(self.n_neurons):
+        
+        if (self.w_update_flag[pre_idx] == 1):
+          # Add spike record
+          self.spike_record = np.append(self.spike_record,
+                                        np.array([pre_idx, self.t]))
+
+          for post_idx in range(self.n_neurons):
+
+            # Check last spike of pre-synaptic partners (forward propagation):
+            if self.network_conn[pre_idx][post_idx] == 1:
+              temporal_diff = (self.t_spike2[pre_idx] + self.synaptic_delay 
+                                - self.t_spike2[post_idx])
+
+              if temporal_diff > 0:  # LTD
+                self.dW = self.dW + self.stdp_weight_update(temporal_diff, pre_idx, post_idx)
+              else:                  # LTP (temporal_diff >= 0)
+                # Addresses the case when temporal_diff = 0
+                # NOTE: t_spike1 for neurons that spiked would only differ
+                #       from t_spike2 by dt=0.1
+                temporal_diff = (self.t_spike2[pre_idx] + self.synaptic_delay 
+                                  - self.t_spike1[post_idx])
+                self.dW = self.dW + self.stdp_weight_update(temporal_diff, pre_idx, post_idx)
+
+            # Inform post-synaptic partners about spike (backpropagation):
+            elif self.network_conn[post_idx][pre_idx] == 1:  
+              temporal_diff =  (self.t_spike2[post_idx] + self.synaptic_delay 
+                                - self.t_spike2[pre_idx])
+              self.dW = self.dW + self.stdp_weight_update(temporal_diff, post_idx, pre_idx)
+              # self.stdp_weight_update(temporal_diff, post_idx, pre_idx)
+
   def simulate(self, 
                sim_duration: float = 1, 
                I_stim: npt.NDArray = None,
                external_spiked_input_w_sums: npt.NDArray = None,
                kappa: float = 8,
-               kappa_noise: float = 0.026):
+               kappa_noise: float = 0.026,
+               temp_param:dict=None):
     """Run simulation
 
     Args: 
@@ -719,16 +951,11 @@ class LIF_Network:
     #   `self.t += self.dt`?
     # - ??? Is the "Informing post-synaptic neuron partner" backpropagation?
     
-    # Set variables
-    per_neuron_coup_strength = kappa / self.n_neurons # [mS/cm^2] Neuron coupling strength (Network-coupling-strength / number-of-neurons)
-    external_stim_coup_strength = kappa / 5  # Coupling strength of input external inputs (i.e., vibrotactile stimuli); value 5 is arbitrary for a strong coupling strength.
 
     euler_steps = int(sim_duration/self.dt)   # Number of Euler-method steps
     euler_step_idx_start = self.t / self.dt  # Euler-step starting index
 
-    # External stimulation current input matrix
-    if I_stim == None:
-      I_stim = np.zeros(shape=(euler_steps, self.n_neurons))
+
     # Weight sums of external spiked and connected input (conductance)
     if external_spiked_input_w_sums == None: 
       external_spiked_input_w_sums = np.zeros(shape=(euler_steps, self.n_neurons))
@@ -744,110 +971,38 @@ class LIF_Network:
     # Euler-step Loop
     for step in range(euler_steps):  # Step-loop: because (time_duration/dt = steps OR sections)
 
-      # Generate Poisson noise
-      poisson_noise_spike_flag = self.simulate_poisson()
-      poisson_noise_spiked_input_count = np.matmul(poisson_noise_spike_flag, self.network_conn)
-
-      # Update Conductance (denoted g) - Integrate inputs from noise and synapses (Equation 6 from paper)
-      del_g_noise = (-self.g_noise 
-                     + kappa_noise * self.tau_syn * poisson_noise_spiked_input_count) * np.exp(-self.dt/self.tau_syn)
-      self.g_noise = (self.g_noise + del_g_noise)
-      del_g_syn = (-self.g_syn 
-                   + kappa/self.n_neurons * self.tau_syn * self.spiked_input_w_sums 
-                   + external_stim_coup_strength * external_spiked_input_w_sums[step, :]) * np.exp(-self.dt/self.tau_syn) 
-      self.syn_g = (self.g_syn + del_g_syn)
-    
-
+      # Dynamic Function Update Poisson noise's conductance
+      self.update_g_noise(kappa_noise=kappa_noise, method=temp_param["update_g_noise_method"])  
+      # Dynamic Function Update synaptic conductance
+      self.update_g_syn(step=step, 
+                        kappa=kappa, 
+                        external_spiked_input_w_sums=external_spiked_input_w_sums, 
+                        method=temp_param["update_g_syn_method"])
       # Reset variables
       self.spiked_input_w_sums = np.zeros(self.n_neurons)     # Weight sum of all spiked-connected presynaptic neurons
       self.w_update_flag = np.zeros(self.n_neurons)           # Connection weight update tracker
-      dW = 0                                                  # Net connection weight change per epoch
-
-      # Update membrane-potential, spiking-threshold
-      # <<<<<<< RETAINED FOR LATER TROUBLESHOOTING
-      # # Dynamic membrane potential - Version 1 - Replicated from Ali's Fortran code - 
-      # self.v = (self.v + (self.dt/self.tau_m) * ((self.g_leak) * (self.v_rest - self.v) 
-      #                                            + (self.g_noise + self.g_syn) * (self.v_rest - self.v)))
-      # # Dynamic membrane potential - Version 2 - Replicated from Ali's Fortran code - with reversal potential of Na+ (20mV) instead of v_rest=0mV
-      # self.v = (self.v + (self.dt/self.tau_m) * ((self.g_leak) * (self.v_rest - self.v) 
-      #                                            + (self.g_noise + self.g_syn) * (20 - self.v)))
-      # >>>>>>>
-      # Dynamic membrane potential (equation 2 from the paper)
-      # <<<<<<< TESTING TESTING TESTING
-      C = self.tau_m        # What Ali used, much fewer network weight updates thus runs much faster  >>>> Jesse recommends Tony to look into STN firing frequency to validate which one to use for PD's STN.
-      # C = self.capacitance  # What the paper stated, many more network updates and runs VERY SLOW!
-      # >>>>>>> TESTING TESTING TESTING
-      I_noise = self.g_noise * (self.v_syn - self.v)
-      del_v = (self.g_leak * (self.v_reset - self.v)
-               + self.g_syn * (self.v_syn - self.v)
-               + I_stim[step] 
-               + I_noise) * (self.dt / C)
-      self.v = (self.v + del_v)
-
-      # Dynamic spiking threshold
-      del_v_thr = (self.v_thr_rest - self.v_thr) * np.exp(-self.dt/self.tau_rf_thr)
-      self.v_thr = (self.v_thr + del_v_thr)
-
-      ## Depolarizing to meet spiking-threshold
-      spike = ((self.v >= self.v_thr) *  # Met dynamic spiking threshold
-               (self.spike_flag == 0))   # Not in abs_refractory period because not recently spiked
-      self.spike_flag[spike] = 1
-      self.w_update_flag[spike] = 1                # Connection-weight update tracker
-      self.t_spike1[spike] = self.t_spike2[spike]  # Moves the t_spike2 array into t_spike1 for placeholding
-      self.t_spike2[spike] = self.t                # t_spike2 keeps track of each neuron's most recent spike's timestamp
-
-      ## Spiking phase
-      spiked = (self.spike_flag == 1)
-      self.v[spiked] = self.v_spike         # Rectangle spike shape by setting voltage to V_spike for duration of tau_spike (equation 3)
-      self.v_thr[spiked] = self.v_rf_spike  # Threshold is reset to V_th_spike=0mV right after spiking (equation 3)
-      in_abs_rf_period = (self.t_spike2 + self.tau_spike) > self.t
-
-      ## Hyperpolarization phase
-      self.v[(~in_abs_rf_period) * spiked] = self.v_reset
-      # Reset spike tracker
-      self.spike_flag[(~in_abs_rf_period) * spiked] = 0
+      self.dW = 0                                                  # Net connection weight change per epoch
+      # Dynamic Function Update membrane potential
+      self.update_v(step=step, 
+                    euler_steps=euler_steps,
+                    I_stim = I_stim, 
+                    method=temp_param["update_v_method"], 
+                    capacitance_method=temp_param["update_v_capacitance_method"])
+      # Dynamic Function Update spike threshold
+      self.update_thr(method=temp_param["update_thr_method"])
       
+      # Check if the neurons spike and mark them as needing to update conn weight
+      self.check_if_spike()
 
-      ## Dirac Delta Distribution (equation 4 in paper)
-      spike_t_diff = self.t - (self.t_spike2 + self.synaptic_delay)  # [n, ] array
-      s_flag = 1.0 * (abs(spike_t_diff) < 0.01)  # 0.01 for floating point errors
-      # Presynaptic neurons' weight sum for each neuron
-      self.spiked_input_w_sums = np.matmul(s_flag,
-                                     self.network_W * self.network_conn)
+      # Depolarization and Hyperpolarization (rectangular spike shape)
+      self.spiking()
+      
+      # Update the variable needed for next step's g_syn calculation
+      self.check_presynaptic_spike_arrival()
 
-      ## STDP (Spike-timing-dependent plasticity)
-      ## Note: Iterates over all pairs of connections using double-nested loops
-      if self.w_update_flag.any():
-        for pre_idx in range(self.n_neurons):
-          
-          if (self.w_update_flag[pre_idx] == 1):
-            # Add spike record
-            self.spike_record = np.append(self.spike_record,
-                                          np.array([pre_idx, self.t]))
-
-            for post_idx in range(self.n_neurons):
-
-              # Check last spike of pre-synaptic partners (forward propagation):
-              if self.network_conn[pre_idx][post_idx] == 1:
-                temporal_diff = (self.t_spike2[pre_idx] + self.synaptic_delay 
-                                 - self.t_spike2[post_idx])
-
-                if temporal_diff > 0:  # LTD
-                  dW = dW + self.stdp_weight_update(temporal_diff, pre_idx, post_idx)
-                else:                  # LTP (temporal_diff >= 0)
-                  # Addresses the case when temporal_diff = 0
-                  # NOTE: t_spike1 for neurons that spiked would only differ
-                  #       from t_spike2 by dt=0.1
-                  temporal_diff = (self.t_spike2[pre_idx] + self.synaptic_delay 
-                                   - self.t_spike1[post_idx])
-                  dW = dW + self.stdp_weight_update(temporal_diff, pre_idx, post_idx)
-
-              # Inform post-synaptic partners about spike (backpropagation):
-              elif self.network_conn[post_idx][pre_idx] == 1:  
-                temporal_diff =  (self.t_spike2[post_idx] + self.synaptic_delay 
-                                  - self.t_spike2[pre_idx])
-                dW = dW + self.stdp_weight_update(temporal_diff, post_idx, pre_idx)
-                # self.stdp_weight_update(temporal_diff, post_idx, pre_idx)
+      # Updates the network_W and dW
+      self.run_stdp_on_all_connected_pairs()
+     
 
       # End of Epoch:
       # NOTE: Used so that multiple simulation runs have continuity.
@@ -855,9 +1010,9 @@ class LIF_Network:
       holder_epoch_timestamps[tix] = self.t
       holder_v[tix] = self.v   
       holder_g_syn[tix] = self.g_syn
-      holder_poi_noise_flags[tix] = poisson_noise_spike_flag
+      holder_poi_noise_flags[tix] = self.poisson_noise_spike_flag
       holder_spiked_input_w_sums[tix] = self.spiked_input_w_sums
-      holder_dw[tix] = dW
+      holder_dw[tix] = self.dW
 
       # Increment Euler-step index
       self.euler_step_idx += 1

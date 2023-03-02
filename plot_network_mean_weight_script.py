@@ -1,29 +1,105 @@
 ## Testing script
 
-from src.model import lifNetwork as lif
+from src.model import lifNetwork2 as lif
 from src.plotting import plotStructure as lifplot
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+from tqdm import tqdm
+from datetime import datetime
 
 
-LIF = lif.LIF_Network(n_neurons=300)
-lifplot.plot_structure(LIF)
+################################################################################
+### CHANGE VARIABLES WITH THIS DICTIONARY
+# - kappa_noise is not used when update_g_noise method uses "Ali"'s method
+#   because he doesn't use this variable.
+################################################################################
 
-holder_mean_network_w = []
 
-for idx in range(10000):
-  LIF.simulate(sim_duration=100)
-  mean_network_w = np.mean(LIF.network_W)
-  holder_mean_network_w.append(mean_network_w)
+params_to_test_diff_models = {"update_g_noise_method": "Ali",
+                              "update_g_syn_method": "Ali",
+                              "update_v_method": "Ali",
+                              "update_v_capacitance_method": "Ali",
+                              "update_thr_method": "Ali",
+                              "kappa":8,  # Paper states 8, Ali's code states 400
+                              "kappa_noise": 0.026  # Ali's code doesn't have this term, he just has g_poisson=1.3
+                              }
 
-  if idx%10 == 0:
-    fig, ax = plt.subplots(figsize=(10, 10))
-    ax.plot(holder_mean_network_w)
-    ax.set_title("<w(t)>")
-    ax.set_xlabel("i-th simulate() run")
-    ax.set_ylabel("mean network weight")
-    
-    os.makedirs("export", exist_ok=True)
-    fig.savefig(f"export/iteration{idx}.png", facecolor="white")
+
+
+
+
+################################################################################
+### PLOTTING FUNCTIONS, DON'T TOUCH!!!
+################################################################################
+def plot_network_mean_weight_over_time(n_neurons:int=300, 
+                                       proba_conn:float=0.8,
+                                       network_mean_w:float = 0.5, 
+                                       sim_duration:float=100, 
+                                       n_sim:int=10000,
+                                       plot_width:float=20, 
+                                       plot_height:float=10,
+                                       export_iteration_skip:int=10,
+                                       temp_param = params_to_test_diff_models):
+  """Plot the mean network weight over time.
+
+  Args:
+      n_neurons (int, optional): _description_. Defaults to 300.
+      proba_conn (float, optional): _description_. Defaults to 0.8.
+      sim_duration (float, optional): _description_. Defaults to 100.
+      n_sim (int, optional): _description_. Defaults to 10000.
+      plot_width (float, optional): _description_. Defaults to 20.
+      plot_height (float, optional): _description_. Defaults to 10.
+      export_iteration_skip (int, optional): _description_. Defaults to 10.
+  """
+  # Set variables
+  now = datetime.now()
+  now_str = now.strftime("%Y-%m-%d-%H-%M-%S")
+  export_directory = "export_"+now_str
+  x_iter = []
+  holder_mean_network_w = []
+
+  # Instantiate LIF network
+  LIF = lif.LIF_Network(n_neurons=n_neurons)
+  LIF.random_conn(mean_w=network_mean_w, proba_conn=proba_conn)
+  # lifplot.plot_structure(LIF)
+
+
+  for iteration in tqdm(range(n_sim)):
+    LIF.simulate(sim_duration=sim_duration, 
+                 kappa=temp_param["kappa"], 
+                 kappa_noise=temp_param["kappa_noise"],
+                 temp_param=temp_param)
+    w_of_connected_pairs = LIF.network_conn * LIF.network_W  # Filter for only connected ones
+    mean_network_w = np.mean(w_of_connected_pairs)
+    print()
+    print(LIF.g_syn)
+    print()
+    x_iter.append(iteration)
+    holder_mean_network_w.append(mean_network_w)
+
+    if (iteration % export_iteration_skip == 0):
+      fig, ax = plt.subplots(figsize=(plot_width, plot_height))
+      ax.scatter(x_iter, holder_mean_network_w)
+      ax.set_title(f"<w(t)>\n\
+                   | n_iterations: {n_sim} | sim_duration: {sim_duration} ms |\n\
+                   | n_neurons: {n_neurons} | proba_of_connection: {proba_conn} |")
+      ax.set_xlabel(f"n-th iteration | each iteration = {sim_duration} ms")
+      ax.set_ylabel("mean network weight")
+      # ax.vlines(x=iteration*sim_duration, ymin=0, ymax=1, 
+      #           label="Simulation Iteration",
+      #           color="red", alpha=0.3)
+      # ax.set_ylim(bottom=0, top=1)
+      # ax.set_xlim(left=0, right=n_sim*sim_duration)
+      # plt.legend()
+      
+      # Export plot
+      os.makedirs(export_directory, exist_ok=True)
+      fig.savefig(f"{export_directory}/iteration_{iteration}.png", 
+                  facecolor="white")
+      
+      # Display inline (JupyterNotebook)
+      # display(fig)
             
+if __name__ == "__main__":
+   plot_network_mean_weight_over_time()
