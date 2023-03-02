@@ -726,14 +726,14 @@ class LIF_Network:
     euler_steps = int(sim_duration/self.dt)   # Number of Euler-method steps
     euler_step_idx_start = self.t / self.dt  # Euler-step starting index
 
-    ## External stimulation current input matrix
+    # External stimulation current input matrix
     if I_stim == None:
       I_stim = np.zeros(shape=(euler_steps, self.n_neurons))
     # Weight sums of external spiked and connected input (conductance)
     if external_spiked_input_w_sums == None: 
       external_spiked_input_w_sums = np.zeros(shape=(euler_steps, self.n_neurons))
 
-    ## Output variable placeholders
+    # Output variable placeholders
     holder_epoch_timestamps = np.zeros((euler_steps, ))
     holder_v = np.zeros((euler_steps, self.n_neurons))
     holder_g_syn = np.zeros((euler_steps, self.n_neurons))
@@ -741,73 +741,50 @@ class LIF_Network:
     holder_spiked_input_w_sums = np.zeros((euler_steps, self.n_neurons))
     holder_dw = np.zeros((euler_steps, ))
 
-
-    ## Euler-step Loop
+    # Euler-step Loop
     for step in range(euler_steps):  # Step-loop: because (time_duration/dt = steps OR sections)
-      start = time.perf_counter()
-      # <<<<<<< DEBUG (Original noise generation)
-      # ## Generate Poisson noise input flags and input current
-      # poisson_noise_spike_flag = self.simulate_poisson()
-      # # poisson_noise_spiked_input_count = np.matmul(poisson_noise_spike_flag, self.network_conn)
 
-      # # Update Conductance (denoted g) - Integrate inputs from noise and synapses
-      # # # Method 1: Original method from Fortran code
-      # self.g_noise = self.g_noise * np.exp(-self.dt/self.tau_syn) + self.g_poisson * poisson_noise_spike_flag
-      # # Method 2: According to the paper's equations (equation 6)
-      # # del_g_noise = (-self.g_noise 
-      # #                + kappa_noise * self.tau_syn * poisson_noise_spiked_input_count) * np.exp(-self.dt/self.tau_syn)
-      # # self.g_noise = (self.g_noise + del_g_noise)
-      # =======
-      ## Generate Poisson noise input flags and input current
+      # Generate Poisson noise
       poisson_noise_spike_flag = self.simulate_poisson()
       poisson_noise_spiked_input_count = np.matmul(poisson_noise_spike_flag, self.network_conn)
 
-      # Update Conductance (denoted g) - Integrate inputs from noise and synapses
-      # # Method 1: Original method from Fortran code
-      # self.g_noise = self.g_noise * np.exp(-self.dt/self.tau_syn) 
-      # Method 2: According to the paper's equations (equation 6)
+      # Update Conductance (denoted g) - Integrate inputs from noise and synapses (Equation 6 from paper)
       del_g_noise = (-self.g_noise 
                      + kappa_noise * self.tau_syn * poisson_noise_spiked_input_count) * np.exp(-self.dt/self.tau_syn)
       self.g_noise = (self.g_noise + del_g_noise)
-      # >>>>>>> DEBUG (Poisson Noise generation)
-
-      # # Method 1: Original method from Fortran code
-      # self.syn_g = (self.syn_g * np.exp(-self.dt/self.tau_syn)
-      #               + per_neuron_coup_strength * self.spiked_input_w_sums
-      #               + external_stim_coup_strength * external_spiked_input_w_sums[step, :]
-      #               )
-      # Method 2: According to the paper's equation (equation 4)
       del_g_syn = (-self.g_syn 
                    + kappa/self.n_neurons * self.tau_syn * self.spiked_input_w_sums 
                    + external_stim_coup_strength * external_spiked_input_w_sums[step, :]) * np.exp(-self.dt/self.tau_syn) 
       self.syn_g = (self.g_syn + del_g_syn)
     
 
-      ## Reset variables
+      # Reset variables
       self.spiked_input_w_sums = np.zeros(self.n_neurons)     # Weight sum of all spiked-connected presynaptic neurons
       self.w_update_flag = np.zeros(self.n_neurons)           # Connection weight update tracker
       dW = 0                                                  # Net connection weight change per epoch
 
-      ## Update membrane-potential, spiking-threshold
+      # Update membrane-potential, spiking-threshold
+      # <<<<<<< RETAINED FOR LATER TROUBLESHOOTING
       # # Dynamic membrane potential - Version 1 - Replicated from Ali's Fortran code - 
       # self.v = (self.v + (self.dt/self.tau_m) * ((self.g_leak) * (self.v_rest - self.v) 
       #                                            + (self.g_noise + self.g_syn) * (self.v_rest - self.v)))
       # # Dynamic membrane potential - Version 2 - Replicated from Ali's Fortran code - with reversal potential of Na+ (20mV) instead of v_rest=0mV
       # self.v = (self.v + (self.dt/self.tau_m) * ((self.g_leak) * (self.v_rest - self.v) 
       #                                            + (self.g_noise + self.g_syn) * (20 - self.v)))
-      # Dynamic membrane potential - Version 3 - Formula from the paper (equation 2)
+      # >>>>>>>
+      # Dynamic membrane potential (equation 2 from the paper)
+      # <<<<<<< TESTING TESTING TESTING
+      C = self.tau_m        # What Ali used, much fewer network weight updates thus runs much faster  >>>> Jesse recommends Tony to look into STN firing frequency to validate which one to use for PD's STN.
+      # C = self.capacitance  # What the paper stated, many more network updates and runs VERY SLOW!
+      # >>>>>>> TESTING TESTING TESTING
       I_noise = self.g_noise * (self.v_syn - self.v)
       del_v = (self.g_leak * (self.v_reset - self.v)
                + self.g_syn * (self.v_syn - self.v)
                + I_stim[step] 
-               + I_noise) * (self.dt / self.tau_m)
+               + I_noise) * (self.dt / C)
       self.v = (self.v + del_v)
 
       # Dynamic spiking threshold
-      # # Method 1: From Ali's Fortran code
-      # self.v_thr = (self.v_thr
-      #         + (self.dt/self.tau_rf_thr) * (self.v_thr_rest-self.v_thr))
-      # Method 2: Paper's formula (equation 3) - This also implements the exponential decay as that in other Euler Scheme formulas
       del_v_thr = (self.v_thr_rest - self.v_thr) * np.exp(-self.dt/self.tau_rf_thr)
       self.v_thr = (self.v_thr + del_v_thr)
 
@@ -837,9 +814,7 @@ class LIF_Network:
       # Presynaptic neurons' weight sum for each neuron
       self.spiked_input_w_sums = np.matmul(s_flag,
                                      self.network_W * self.network_conn)
-      stop = time.perf_counter()
-      print(f"Dynamic functions' total processing time: {stop-start} s")
-      start = time.perf_counter()
+
       ## STDP (Spike-timing-dependent plasticity)
       ## Note: Iterates over all pairs of connections using double-nested loops
       if self.w_update_flag.any():
@@ -874,8 +849,7 @@ class LIF_Network:
                                   - self.t_spike2[pre_idx])
                 dW = dW + self.stdp_weight_update(temporal_diff, post_idx, pre_idx)
                 # self.stdp_weight_update(temporal_diff, post_idx, pre_idx)
-      stop = time.perf_counter()
-      print(f"Total time to iterate through conn matrix with stdp calls: {stop-start} s")
+
       # End of Epoch:
       # NOTE: Used so that multiple simulation runs have continuity.
       tix = int(self.euler_step_idx - euler_step_idx_start)
