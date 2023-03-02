@@ -719,7 +719,7 @@ class LIF_Network:
 
     ## Euler-step Loop
     for step in range(euler_steps):  # Step-loop: because (time_duration/dt = steps OR sections)
-      start = time.perf_counter()
+      
       ## Generate poisson inputs
       self.simulate_poisson()  # Saved in `self.poisson_input_flag`
 
@@ -782,13 +782,11 @@ class LIF_Network:
       # Presynaptic neurons' weight sum for each neuron
       self.spiked_input_w_sums = np.matmul(s_flag,
                                      self.network_W * self.network_conn)
-      stop = time.perf_counter()
-      print(f"Dynamic functions' total processing time: {stop-start} s")
-      start = time.perf_counter()
+      
       ## STDP (Spike-timing-dependent plasticity)
       ## Note: Iterates over all pairs of connections using double-nested loops
       if self.w_update_flag.any():
-        print(sum(self.w_update_flag))
+        
         for pre_idx in range(self.n_neurons):
           
           if (self.w_update_flag[pre_idx] == 1):
@@ -819,8 +817,7 @@ class LIF_Network:
                                   - self.t_spike2[pre_idx])
                 dW = dW + self.Delta_W_tau(temporal_diff, post_idx, pre_idx)
                 # self.Delta_W_tau(temporal_diff, post_idx, pre_idx)
-      stop = time.perf_counter()
-      print(f"Total time to iterate through conn matrix with stdp calls: {stop-start} s")
+      
       # End of Epoch:
       # NOTE: Used so that multiple simulation runs have continuity.
       tix = int(self.euler_step_idx - euler_step_idx_start)
