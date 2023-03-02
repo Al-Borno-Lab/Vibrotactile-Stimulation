@@ -855,6 +855,7 @@ class LIF_Network:
                kappa: float = 8,
                kappa_noise: float = 0.026,
                temp_param:dict=None):
+    
     """Run simulation
 
     Args: 
