@@ -27,9 +27,9 @@ choose_model_setup = {"update_g_noise_method": "Ali",
 ################################################################################
 ### PLOTTING FUNCTIONS, DON'T TOUCH!!!
 ################################################################################
-def plot_network_mean_weight_over_time(n_neurons=1000,
-                                       n_sim = 1000,
-                                       sim_duration=1000,
+def plot_network_mean_weight_over_time(n_neurons=300,
+                                       n_sim = 10000,
+                                       sim_duration=100,
                                        kappa=400,  # Paper states 8, Ali's code states 400
                                        kappa_noise=0.026,  # Ali's code does have this, he just used g_poisson=1.3
                                        proba_conn = 0.8,
