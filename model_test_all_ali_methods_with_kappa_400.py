@@ -22,29 +22,23 @@ choose_model_setup = {"update_g_noise_method": "Ali",
                       "update_v_capacitance_method": "Ali",
                       "update_thr_method": "Ali"
                       }
-param_instantiate = {"n_neurons": 1000}
-
-param_random_conn = {"proba_conn": 0.8,
-                     "network_mean_w": 0.5}
-
-param_simulate = {"sim_duration": 1000,
-                  "kappa": 400,  # Paper states 8, Ali's code states 400
-                  "kappa_noise": 0.026,  # Ali's code doesn't have this term, he just has g_poisson=1.3
-                  }
-
 
 
 ################################################################################
 ### PLOTTING FUNCTIONS, DON'T TOUCH!!!
 ################################################################################
-param_simulate["temp_param"] = choose_model_setup
-param_for_below_func = {"param_instantiate":param_instantiate,
-                        "param_random_conn":param_random_conn,
-                        "param_simulate":param_simulate,
-                        "plot_width": 25,
-                        "plot_height": 10
-                        }
-def plot_network_mean_weight_over_time(param_instantiate, param_random_conn, param_simulate):
+def plot_network_mean_weight_over_time(n_neurons=1000,
+                                       n_sim = 1000,
+                                       sim_duration=1000,
+                                       kappa=400,  # Paper states 8, Ali's code states 400
+                                       kappa_noise=0.026,  # Ali's code does have this, he just used g_poisson=1.3
+                                       proba_conn = 0.8,
+                                       mean_w = 0.5,
+                                       export_iteration_skip = 10,
+                                       plot_width = 25,
+                                       plot_height=10,
+                                       choose_model_setup=choose_model_setup,
+                                       ):
   """Plot the mean network weight over time.
 
   Args:
@@ -64,18 +58,20 @@ def plot_network_mean_weight_over_time(param_instantiate, param_random_conn, par
   holder_mean_network_w = []
 
   # Instantiate LIF network
-  LIF = lif.LIF_Network(**param_instantiate)
-  LIF.random_conn(**param_random_conn)
+  LIF = lif.LIF_Network(n_neurons=n_neurons)
+  LIF.random_conn(proba_conn=proba_conn, mean_w=mean_w)
   # lifplot.plot_structure(LIF)
 
 
   for iteration in tqdm(range(n_sim)):
-    LIF.simulate(**param_simulate)
+    LIF.simulate(sim_duration=sim_duration, 
+                 kappa=kappa, 
+                 kappa_noise=kappa_noise,
+                 temp_param=choose_model_setup)
+    
     w_of_connected_pairs = LIF.network_conn * LIF.network_W  # Filter for only connected ones
     mean_network_w = np.mean(w_of_connected_pairs)
-    print()
-    print(LIF.g_syn)
-    print()
+    
     x_iter.append(iteration)
     holder_mean_network_w.append(mean_network_w)
 
