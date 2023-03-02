@@ -786,7 +786,6 @@ class LIF_Network:
       ## STDP (Spike-timing-dependent plasticity)
       ## Note: Iterates over all pairs of connections using double-nested loops
       if self.w_update_flag.any():
-        
         for pre_idx in range(self.n_neurons):
           
           if (self.w_update_flag[pre_idx] == 1):
