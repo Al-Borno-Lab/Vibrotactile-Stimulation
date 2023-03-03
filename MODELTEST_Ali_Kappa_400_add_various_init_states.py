@@ -68,7 +68,7 @@ def plot_network_mean_weight_over_time(n_neurons=300,
 
 
   for iteration in tqdm(range(n_sim)):
-    for key, LIF in holder_LIF:
+    for key, LIF in holder_LIF.items():
       LIF.simulate(sim_duration=sim_duration, 
                   kappa=kappa, 
                   kappa_noise=kappa_noise,
@@ -83,7 +83,7 @@ def plot_network_mean_weight_over_time(n_neurons=300,
     if (iteration % export_iteration_skip == 0):
       fig, ax = plt.subplots(figsize=(plot_width, plot_height))
 
-      for key, mean_network_w in holder_mean_network_w:
+      for key, mean_network_w in holder_mean_network_w.items():
         ax.scatter(x_iter, mean_network_w, label=key)
 
       ax.set_title(f"<w(t)>\n\
