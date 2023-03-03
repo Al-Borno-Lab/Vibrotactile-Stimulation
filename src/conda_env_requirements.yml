@@ -1,4 +1,4 @@
-name: ccm_conda_env
+name: vibro
 channels:
   - conda-forge
 dependencies:
