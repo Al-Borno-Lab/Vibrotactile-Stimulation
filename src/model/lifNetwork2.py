@@ -708,12 +708,12 @@ class LIF_Network:
       #   Discussed with Jesse and can't quite figure it out.
       capa_rv = self.tau_m        # What Ali used, much fewer network weight updates thus runs much faster  >>>> Jesse recommends Tony to look into STN firing frequency to validate which one to use for PD's STN.
       # g_leak = 0.02  # MISTAKE!!! ALI DECLARED THIS AS 10!!! NEED TO RESIM!
-      g_leak = 10
+      g_leak = self.g_leak_ali  # 10
     elif capacitance_method == "Paper":
       # NOTE: This is how the variable is defined in the paper (equation 2)
       capa_rv = self.capacitance  # What the paper stated, many more network updates and runs VERY SLOW!
       # g_leak = 10  # MISTAKE!!! ONE OF FOUR OF THE SIMULATION RAN USED THIS VALUE AND TOOK FOREVER. I THINK THIS IS THE REASON!!!
-      g_leak = 0.02
+      g_leak = self.g_leak
 
 
     # Different ways to update membrane potential
