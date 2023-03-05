@@ -1,7 +1,7 @@
 ## Testing script
 
-from src.model import lifNetwork2 as lif
-from src.plotting import plotStructure as lifplot
+from ..model import lifNetwork2 as lif
+from ..plotting import plotStructure as lifplot
 import matplotlib.pyplot as plt
 import numpy as np
 import os
