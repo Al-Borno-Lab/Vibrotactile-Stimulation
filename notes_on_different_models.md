@@ -145,8 +145,23 @@ The various models are testing by adjusting the dictionary value of each of the 
 ![PlotExport](ignored_dir/cluster_runs/11_modelTest_ali_various_initial_weight_kappa400/export_2023-03-02-23-14-08/iteration_9990.png)
 
 
+### 13_test_with_python_m_flag
+- A copy of model (11) just to test calling Python using the m flag
+- The purpose of the m flag is so that I can place the testing Python script in the codebase root (i.e., src)'s subdirectory and have all the relative imports in the testing script to work. The m flag allows the test script to be a module in a packgae instead of an external script outside of the root package hierarchy. 
 
+### 14_test_with_python_m_flag
+- A copy of model (2) with g_leak issue fixed to be g_leak = 10 instead of 0.02.
+- This is essentially the same as Ali's code, however, with initial weight of 0.5, we are still seeing that it plateau at around 0.15 instead of something higher at 0.33 as seen in figure 3 of Ali's paper. 
+- My hypothesis of the differences in my simulation vs the figure in Ali's paper is due to the lacking of 500s RVS CR stimulation that Ali did in his paper.
+![PlotExport](ignored_dir/cluster_runs/14_test_with_python_m_flag/export_2023-03-04-16-28-02/iteration_790.png)
 
+- Next step: [ ] Adjust the x-axis to match that of Ali's in units of hours.
+- Next step: [ ] Add in RVS CR stimulation to match Ali's paper.
+- Next step: [ ] But do all these with different initial weights
+
+### 15_test_with_python_m_flag
+- This is supposed to be a copy of model 11 but the usage of PYTHONPATH so that when calling Python with the m flag, we can do so without cd. However, I accidentally duplicated model 14, thus this is identicaly to model 14.
+![PlotExport](ignored_dir/cluster_runs/15_test_with_python_m_flag/export_2023-03-04-16-13-42/iteration_780.png)
 
 
 
