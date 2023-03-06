@@ -74,8 +74,7 @@ def plot_network_mean_weight_over_time(n_neurons=300,
                   kappa_noise=kappa_noise,
                   temp_param=choose_model_setup)
     
-      w_of_connected_pairs = LIF.network_conn * LIF.network_W  # Filter for only connected ones
-      mean_network_w = np.mean(w_of_connected_pairs)
+      mean_network_w = np.mean(LIF.network_W[LIF.network_conn])
       holder_mean_network_w[key].append(mean_network_w)
 
     x_iter.append(iteration)
