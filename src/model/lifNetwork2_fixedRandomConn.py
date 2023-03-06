@@ -1,4 +1,4 @@
-### Copied from lifNetwork2 - Fixed random conn averaging issue
+### Copied from lifNetwork2 - Fixed random conn averaging issue - However, it seems the results are the same.
 
 
 import matplotlib.pyplot as plt    # MatPlotLib is a plotting package. 
@@ -143,9 +143,8 @@ class LIF_Network:
     self.network_W = self.network_W * self.network_conn
 
     # Normalized to mean weight (i.e., `mean_w`)
-    mask_connected = (self.network_conn == 1)
     self.network_W = (self.network_W * 
-                      (mean_w / np.mean(self.network_W[mask_connected])))          
+                      (mean_w / np.mean(self.network_W[self.network_conn])))          
     
     # Hardbound the network weight to [0, 1] inclusive
     self.network_W[self.network_W > 1] = 1
