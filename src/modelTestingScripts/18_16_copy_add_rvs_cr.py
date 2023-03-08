@@ -79,8 +79,8 @@ def plot_network_mean_weight_over_time(n_neurons=300,
 
   for iteration in tqdm(range(n_sim)):
     ## Subset external_stim matrix
-    idx_row_start = iteration * sim_duration/dt
-    idx_row_end = (iteration+1) * sim_duration/dt
+    idx_row_start = int(iteration * sim_duration/dt)
+    idx_row_end = int((iteration+1) * sim_duration/dt)
     external_stim_subset = external_stim[idx_row_start:idx_row_end, :]
 
     ## Simulate each initial mean weight
