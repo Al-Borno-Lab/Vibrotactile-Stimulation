@@ -58,14 +58,15 @@ def plot_network_mean_weight_over_time(n_neurons=300,
   holder_mean_network_w = {}
   holder_LIF  = {}
   dt = 0.1
-  external_stim = externalStimGenerator(n_neurons=n_neurons, 
-                                        freq_cr=17.5,
-                                        stim_amplitude = 1,
-                                        dt = dt,
-                                        stim_duration = sim_duration,
-                                        n_sim_iter = n_sim, 
-                                        rvs_cr_start_sec = 500, 
-                                        rvs_cr_duration_sec = 500)
+  external_stim = externalStimGenerator.manual_rvs_cr_stim_generation(
+                  n_neurons=n_neurons, 
+                  freq_cr=17.5,
+                  stim_amplitude = 1,
+                  dt = dt,
+                  stim_duration = sim_duration,
+                  n_sim_iter = n_sim, 
+                  rvs_cr_start_sec = 500, 
+                  rvs_cr_duration_sec = 500)
 
   # Instantiate LIF network
   for idx, val in enumerate(mean_w):
