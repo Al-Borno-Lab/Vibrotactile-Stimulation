@@ -699,8 +699,9 @@ class LIF_Network:
     """
 
     # External stimulation current input matrix
-    if (type(I_stim) == np.ndarray) & (I_stim.any() != None): 
-      ...
+    if (type(I_stim) == np.ndarray):
+      if (I_stim.any() != None): 
+        ...
     elif I_stim == None:
       I_stim = np.zeros(shape=(euler_steps, self.n_neurons))
 
