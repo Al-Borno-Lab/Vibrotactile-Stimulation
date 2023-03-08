@@ -699,8 +699,12 @@ class LIF_Network:
     """
 
     # External stimulation current input matrix
-    if I_stim == None:
+    if (type(I_stim) == np.ndarray) & (I_stim.any() != None): 
+      ...
+    elif I_stim == None:
       I_stim = np.zeros(shape=(euler_steps, self.n_neurons))
+
+    assert type(I_stim) == np.ndarray, "The I_stim matrix has to be a numpy ndarray."
 
     # Variable value to use depending on Ali or the Paper's implementation
     if (capacitance_method == "Ali"):
