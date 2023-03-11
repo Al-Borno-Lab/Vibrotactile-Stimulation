@@ -2,9 +2,9 @@ name: vibro
 channels:
   - conda-forge
 dependencies:
-  - python=3.10
-  - numpy=1.22
-  - matplotlib=3.7
-  - scipy=1.10
-  - ipython
+  - python=3.11
+  - numpy
+  - scipy
+  - matplotlib
   - tqdm
+  - jax
