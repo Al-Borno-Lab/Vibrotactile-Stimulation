@@ -1,0 +1,44 @@
+Bootstrap: docker
+From: alpine:3.17.2
+
+%help
+Singularity container built upon the Docker's Alpine image.
+
+%setup
+
+%files
+
+%labels
+    Maintainer "Anthony Lee"
+    MaintainerContact "anthony.y.lee@ucdenver.edu"
+
+%environment
+
+%post
+    # Install bash
+    apk add --no-cache bash
+
+    # Install conda
+    wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/Miniconda3_Python3_10.sh
+    bash ~/Miniconda3_Python3_10.sh -b -p $HOME/miniconda3
+    conda update conda
+    rm Miniconda3_Python3_10.sh
+    
+    # Install wget at base
+    conda install wget
+
+    # Install new environment
+    conda create --yes --name vibro python=3.10 \
+                                    numpy=1.24 \
+                                    matplotlib=3.7 \
+                                    scipy=1.10 \
+                                    ipython=8.11 \
+                                    tqdm=4.65 \
+                                    jax=0.4
+
+    # Activate new environment
+    conda activate vibro
+
+%runscript
+
+%test
