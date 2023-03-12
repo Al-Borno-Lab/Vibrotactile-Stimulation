@@ -1,6 +1,6 @@
 ## Testing script
 
-from ..model import lifNetwork2 as lif
+from ..model import lifNetwork as lif
 from ..plotting import plotStructure as lifplot
 import matplotlib.pyplot as plt
 import numpy as np

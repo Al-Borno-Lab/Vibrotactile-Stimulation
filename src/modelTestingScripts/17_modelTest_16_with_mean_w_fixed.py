@@ -1,6 +1,6 @@
 ## Testing script
 
-from src.model import lifNetwork2_fixedRandomConn as lif
+from src.model import lifNetwork as lif
 from src.plotting import plotStructure as lifplot
 import matplotlib.pyplot as plt
 import numpy as np
