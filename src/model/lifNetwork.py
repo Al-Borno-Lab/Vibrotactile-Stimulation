@@ -593,6 +593,14 @@ class LIF_Network:
       especially when converting to radians. Perhaps period of 100ms is adequate
       as it would divide 2pi into 1000 sections.
     """
+    
+    ## TODO (Tony): 
+    # - [ ] Rename the period argument, name is misleading.
+
+    ## NOTES (Tony): 
+    # - The higher the period value, the higher the resolution in the calculation
+    #  especially when converting to radians. Perhaps period of 100ms is adequate
+    #  as it would divide 2pi into 1000 sections.
 
     # Convert period and lookback from ms to euler-steps
     if period is None:
@@ -975,7 +983,6 @@ class LIF_Network:
       - ??? Is the "Informing post-synaptic neuron partner" backpropagation?
     """
     
-
     euler_steps = int(sim_duration/self.dt)   # Number of Euler-method steps
     euler_step_idx_start = self.t / self.dt  # Euler-step starting index
 
