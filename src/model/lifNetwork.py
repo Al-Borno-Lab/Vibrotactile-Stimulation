@@ -4,208 +4,243 @@ from scipy import stats            # ScPy is a scientific computing package. We 
 from scipy.stats import circmean
 import math
 from posixpath import join
+import numpy.typing as npt
 import time
 
 class LIF_Network:
-  def __init__(self, n_neurons = 1000, dimensions = [[0,100],[0,100],[0,100]]):
-    """Leaky Intergrate-and-Fire (LIF) Neuron network model.
+  """Leaky Intergrate-and-Fire (LIF) Neuron network model.
 
-    Args:
-      n_neurons (int): number of neurons; default to 1000 neurons
-      dimensions: Spatial dimensions for plotting; this plots the neurons in a 
-        100x100x100 3D space by default.
+  Args:
+    n_neurons (int): number of neurons; default to 1000 neurons
+    dimensions: Spatial dimensions for plotting; this plots the neurons in a 
+      100x100x100 3D space by default.
+    auto_random_connect (bool): Whether to randomly connec the neurons.
 
-    Attr:
-      n_neurons: 
-      dimensions: 
-      x: 
-      y:
-      z: 
-      t: current time [ms]
-      dt: time step [ms]
-      euler_step_idx: time index
-      relax_time: length of relaxation phase [ms]
-      v: internal voltage [mV]
-      v_rest: resting voltage, equilibrium [mV] def: -38
-      v_thr: 
-      v_rf_thr: reversal potential for spiking during refractory period [mV]
-      v_rf_tau: 
+  NOTE (Tony): ((Discrepancy between code vs paper)):
+    - tau_m is an odd value and we speculate it to be the capacitance rv from 
+      eqaution (2) of the paper, however, even then, its generated values are
+      off. The paper states the capacitance is drawn from a different dist.
+    - Initial value of membrane potential according to the paper is drawn from
+      unif(-38, -40), however, Ali's code has unif(-55, -35)
+    - Regarding dynamic voltage threshold, it wasn't clear from the paper if 
+      the initial value was set to 0mV or -40mV. However, it seems like from
+      Ali's code, the initial value is -40mV.
+    - tau_spike was mentioned in the paper, but the value wasn't.
+    - Poisson noise distribution was using binomial distribution estimation, 
+      which would break down as the poisson frequency increases, or when n is 
+      small. Changed the implementation to actual Poisson distribution for 
+      robustness.
+    - g_leak in Ali's code is 10, but paper states 0.02
+  """
 
-    Returns:
+  def __init__(self, n_neurons = 1000, 
+               dimensions = [[0,100],[0,100],[0,100]],
+               auto_random_connect: bool = True) -> None:
 
-    """
-    # NOTE (Tony): ** Assumptions of the model **
-    # - k (kappa) - is the "maximal coupling strength" as defined for equation 
-    #   (4) in the paper. It is unclear that the value is from the paper, but 
-    #   from the code, the value is set to 400.
-    # - The external_coup_strength, which is max_coup_strength divided by
-    #   the arbitrary value 5 is hard-coded.
 
-    # TODO (Tony):
-    # - [ ] Revisit the parameters of STDP and understand what they are doing.
+    # Values that Ali uses in his codebase
+    self.v_spike = 20  # Not in paper, but shows up in Ali's codebase                       # [mV] The voltage that spikes rise to ((AP Peak))
+    self.g_leak_ali = 10  # The value Ali used in his code
+    self.v_ali = np.random.uniform(low=-10, high=10, size=(self.n_neurons,)) - 45           # [mV] Current membrane potential - Initialized with Unif(-55, -35)
+    self.tau_spike = 1                                                                      # [ms] Time for an AP spike, also the length of the absolute refractory period
 
     # Neuron count
     self.n_neurons = n_neurons
     
     # Spatial organization
-    self.dimensions = dimensions;
-    self.x = np.random.uniform(low=self.dimensions[0][0], high=self.dimensions[0][1], size=(self.n_neurons,))
-    self.y = np.random.uniform(low=self.dimensions[1][0], high=self.dimensions[1][1], size=(self.n_neurons,))
-    self.z = np.random.uniform(low=self.dimensions[2][0], high=self.dimensions[2][1], size=(self.n_neurons,))
+    self.dimensions = dimensions
+    self.x = np.random.uniform(*self.dimensions[0], size=self.n_neurons)
+    self.z = np.random.uniform(*self.dimensions[2], size=self.n_neurons)
+    self.y = np.random.uniform(*self.dimensions[1], size=self.n_neurons)
 
     # Internal time trackers
-    self.t = 0                                                                              # current time [ms]
-    self.dt = .1                                                                            # timestep leng [ms]
-    self.euler_step_idx = 0                                                                 # time index
-    self.relax_time = 10000                                                                 # length of relaxation phase [ms]
+    self.t = 0                                                                              # [ms] Current time 
+    self.dt = 0.1                                                                           # [ms] Timestep length
+    self.euler_step_idx = 0                                                                 # [idx] Euler step index
+    self.relax_time = 10000                                                                 # [ms] Length of relaxation phase 
 
     # Electrophysiology values
-    self.v = np.random.uniform(low=-10, high=10, size=(self.n_neurons,)) - 45               # internal voltage [mV]
-    self.v_rest = -38                                                                       # the resting voltage, equilibrium [mV] def: -38
+    self.v = np.random.uniform(low=-38, high=-40, size=(self.n_neurons,))
+    self.v_rest = -38                                                                       # [mV] Resting voltage, equilibrium voltage. Default: -38 mV
+    self.v_thr = np.zeros(self.n_neurons) - 40                                              # [mV] Reversal potential for spiking; equation (3)
+    self.v_thr_rest = np.zeros(self.n_neurons) - 40                                         # [mV] Reversal potential for spiking during refractory period. Defaults to -40mV; equation (3).
+    self.v_syn = 0                                                                          # [mV] Reversal potential; equation (2) in paper
+    self.tau_syn = 1                                                                        # [ms] Synaptic time-constant; equation (4) in paper
+    self.tau_rf_thr = 5                                                                     # [ms] Timescale tau between refractory and normal thresholds relaxation period
+    self.g_leak = 0.02                                                                      # [mS/cm^2] Conductivity of the leak channels; equation (2) in paper
+    self.g_syn_initial_value = 0                                                            # [mS/cm^2] Initial value of synaptic conductivity; equation (2) in paper
+    # Connectivity parameters (connection weight = conductivity)
+    self.synaptic_delay = 3                                                                 # [ms] Synaptic transmission delay from soma to soma (default: 3 ms), equation (4) in paper
+    # Threshold and Membrane Potential are set to following values after spiking ((Equation 3 in paper))
+    self.v_reset = -67                                                                      # [mV] Membrane potential right after spikeing ((Hyperpolarization)); equation (3) in paper
+    self.v_rf_spike = 0                                                                     # [mV] Threshold during relative refractory period; V_th_spike of equation (3) in paper
+    self.capacitance = 0.001 * np.random.normal(loc=3,                                      # [mF/cm^2] Converted from micro-Farad to mF; equation (2) in paper
+                                                scale=(0.05*3), 
+                                                size=self.n_neurons)
 
-    self.v_thr = np.ones([self.n_neurons,]) * -40                                           # Potential Threshold for spiking [mV]
-    self.v_rf_thr = np.ones([self.n_neurons,]) * -40                                        # Potential Threshold for spiking during (relative) refractory period [mV]
-    self.v_rf_tau = 5                                                                       # the relaxation tau between refractory and normal thresholds.
+    # Input noise of Poisson distribution (input is generated with I = G*V)
+    self.g_poisson = 1.3                                                                    # [mS/cm^2] conductivity of the extrinsic poisson inputs
+    self.poisson_noise_spike_flag = np.zeros(self.n_neurons)
 
-    self.v_reset = -67                                                                      # the reset, overshoot voltage [mV] ((??? Hyperpolarization))
-    self.v_spike = 20                                                                       # the voltage that spikes rise to [mV] ((??? AP Peak))
-    self.v_rf_spike = 0                                                                     # relative refractory period potential threshold [mV]
-
-    self.spike_length = 1                                                                   # [ms] Time for an AP spike, also the length of the absolute refractory period
-    self.spike_flag = np.zeros([self.n_neurons,])                                           # Tracker of whether a neuron spiked
-    self.t_spike1 = np.zeros([self.n_neurons,]) - 10000                                     # Tracker of spike timestamp; Default to -10000 for mathematical computation convenience; keep track of the previous timestamps of spiked neurons.
-    self.t_spike2 = np.zeros([self.n_neurons,]) - 10000                                     # Tracker of spike timestamp; Default to -10000 for mathematical computation convenience; keep track of the current timestamps of spiked neurons.
-    self.spike_record = np.empty(shape=[1,2])                                               # Spike record recorded as a list: [neuron_number, spike_time]
-    self.g_leak = 10                                                                        # [nS] Conductance of the leak channels
-
-    tau_c1 = np.sqrt(-2 * np.log(np.random.random(size=(self.n_neurons,))))                 # ???membrane time-constant component 1 ???
-    tau_c2 = np.cos(2 * np.pi * np.random.random(size=(self.n_neurons,)))                   # ???membrane time-constant component 2 ???                                           
-    self.m_tau = 7.5 * tau_c1 * tau_c2 + 150                                                # [ms] Membrane time-constant
-
-    self.syn_tau = 1                                                                        # [ms] Synaptic time-constant
-    self.v_syn = 0                                                                          # [mV] Reversal potential; equation (2) of paper
-    self.syn_g = np.zeros([self.n_neurons,])                                                # Tracker of dynamic synaptic conductance
-    
-    self.g_poisson = 1.3                                                                    # [mS/cm^2] Conductance of the extrinsic poisson inputs
-    self.poisson_freq = (20 * 0.001) * self.dt                                              # [count] Poisson input frequency (2e-3 times [per time-interval [dt = 0.1 ms]])
-    self.poisson_input_flag = np.zeros([self.n_neurons,])                                   # Input vector of external noise to each neuron
-    self.noise_g = np.zeros([self.n_neurons,])                                              # Tracker of dynamic noise conductance
+    # Internal Trackers
+    self.spike_flag = np.zeros(self.n_neurons)                                              # Tracker of whether a neuron spiked
+    self.t_spike1 = np.zeros(self.n_neurons) - 10000                                        # Tracker of spike timestamp; Default to -10000 for mathematical computation convenience; keep track of the previous timestamps of spiked neurons.
+    self.t_spike2 = np.zeros(self.n_neurons) - 10000                                        # Tracker of spike timestamp; Default to -10000 for mathematical computation convenience; keep track of the current timestamps of spiked neurons.
+    self.spike_record = np.empty(shape=(1, 2))                                              # Tracker of Spike record recorded as a list: [neuron_number, spike_time]
+    self.g_syn = np.zeros(self.n_neurons) + self.g_syn_initial_value                        # Tracker of dynamic synaptic conductivity. Initial value of 0.; equation (2)
+    self.g_noise = np.zeros(self.n_neurons)                                                 # Tracker of dynamic noise conductivity
+    # self.poisson_input_flag = np.zeros(self.n_neurons)                                      # Tracker of Input vector of external noise to each neuron
+    self.w_update_flag = np.zeros(self.n_neurons)                                           # Tracker of connetion weight updates. When a neuron spikes, it is flagged as needing update on its connection weight.
+    self.spiked_input_w_sums = np.zeros(self.n_neurons)                                     # Tracker of the connected presynaptic weight sum for each neuron (Eq 4: weight * Dirac Delta Distribution)
+    self.dW = 0                                                                             # Tracker of change of weight used by `run_stdp_on_all_connected_pairs()`
+    self.network_conn = np.zeros([self.n_neurons, self.n_neurons])                          # Tracker of Neuron connection matrix: from row-th neuron to column-th neuron
+    self.network_W = np.random.random(size=(self.n_neurons, self.n_neurons))                # Tracker of Neuron connection weight matrix: from row-th neuron to column-th neuron
 
     # STDP paramters
-    self.stdp_beta = 1.4                                                                    # Balance factor for LTP and LTD
-    self.stdp_tau_R = 4                                                                     # When desynchronized and synchronized states coexist
-    self.stdp_tau_plus = 10                                                                 # For the postive half of STDP
-    self.stdp_tau_neg = self.stdp_tau_R * self.stdp_tau_plus                                # For the negative half of STDP
-    self.eta = 0.02                                                                         # Scales the weight update per spike; 0.02 for "slow STDP" (eq 7 in paper)
-    self.w_update_flag = np.zeros([self.n_neurons,])                                        # Tracker of connetion weight updates
-                                                                                            # When a neuron spikes, it is flagged as needing update on its connection weight.
-    
-    # Connectivity parameters (connection weight = conductance)
-    self.proba_conn = .07                                                                   # Probability of presynaptic connections from other neurons
-    self.mean_w = 0.5                                                                       # [mS/cm^2] Mean conductance of synapses; (conductance = connection weight)
-    self.synaptic_delay = 3                                                                 # [ms] Time for an AP to propogate from a pre- to post-synaptic neuron (default: 3 ms)
-    max_coup_strength = 400                                                                 # [mS/cm^2] Maximal coupling strength; maximal conductance (Equation 4 in paper)
-    self.per_neuron_coup_strength = max_coup_strength / self.n_neurons                      # [mS/cm^2] Neuron coupling strength (Network-coupling-strength / number-of-neurons)
-    self.spiked_input_w_sums = np.zeros([self.n_neurons,])                                  # Tracker of the connected presynaptic weight sum for each neuron (Eq 4: weight * Dirac Delta Distribution)
-    self.external_stim_coup_strength = max_coup_strength / 5                                # Coupling strength of input external inputs (i.e., vibrotactile stimuli); value 5 is arbitrary for a strong coupling strength.
-    self.network_conn = np.zeros([self.n_neurons,self.n_neurons])                           # Neuron connection matrix: from row-th neuron to column-th neuron
-    self.network_W = np.random.random(size=(self.n_neurons,self.n_neurons))                 # Neuron connection weight matrix: from row-th neuron to column-th neuron
+    self.stdp_beta = 1.4                                                                    # Balance factor (ratio of LTD to LTP); equation (7)
+    self.stdp_tau_r = 4                                                                     # When desynchronized and synchronized states coexist; equation (7)
+    self.stdp_tau_plus = 10                                                                 # For the postive half of STDP; equation (7)
+    self.stdp_tau_neg = self.stdp_tau_r * self.stdp_tau_plus                                # For the negative half of STDP; equation (7)
+    self.eta = 0.02                                                                         # Scales the weight update per spike; 0.02 for "slow STDP"; equation (7)
+
+    # ??? Speculate to be capacitance random value drawn from a normal distribution ???
+    tau_c1 = np.sqrt(-2 * np.log(np.random.random(size=(self.n_neurons,))))                 # ??? membrane time-constant component 1 ??? - Jesse and Tony are unsure what this is 
+    tau_c2 = np.cos(2 * np.pi * np.random.random(size=(self.n_neurons,)))                   # ??? membrane time-constant component 2 ??? - Jesse and Tony are unsure what this is  
+    self.tau_m = 7.5 * tau_c1 * tau_c2 + 150                                                # ??? Unsure what this is, but through usage seems like the capacitance random-variable in equation (2) (However, values are off...)
     
     # Generate neuron connection matrix
-    self.random_conn()  # Create random neuron connections
+    if auto_random_connect:
+      self.random_conn()  # Create random neuron connections
 
-  def random_conn(self,):
-    """Randomly create connections between neurons.
+  def random_conn(self, mean_w: float=0.5, proba_conn: float=0.07):
+    """Randomly create connections between neurons basing on the proba_conn.
 
     Using LIF neuron objects intrinsic probability of presynaptic connections
-    from other neurons (`proba_conn`), and then mean conductance of synapses 
+    from other neurons (`proba_conn`), and then mean conductivity of synapses 
     (mean_w) to normalize the randomly generated value.
 
     Update `network_W` matrix to binary values indicating the connections
     between neurons.
+
+    Args:
+        mean_w (float, optional): The mean connection weight to normalize each  
+          connection in the network to. Defaults 0.5
+        proba_conn (float, optional): Probability of connection between neurons.
+          Defaults 0.07.
+    
+    NOTE (Tony): 
+      - `pc` is a connectivity probability matrix randomly generated with the 
+        dimension of n_neurons * n_neurons representing the combinations of 
+        connections between the neurons.
+      - Mark the connections that are below the "probability of presynaptic
+        connection" threshold as 0
+      - Normalize to the mean conudctance of synapses.
+      - Set connections with normalized weight greater than 1 as 1; and set 
+        connections with normalized weight less than 0 as 0.
     """
-    # NOTES (Tony): 
-    # - `pc` is a connectivity probability matrix randomly generated with the 
-    #   dimension of n_neurons * n_neurons representing the combinations of 
-    #   connections between the neurons.
-    # - Mark the connections that are below the "probability of presynaptic
-    #   connection" threshold as 0
-    # - Normalize to the mean conudctance of synapses.
-    # - Set connections with normalized weight greater than 1 as 1; and set 
-    #   connections with normalized weight less than 0 as 0.
 
     pc = np.random.random(size=(self.n_neurons,self.n_neurons))  # Connectivity probability matrix
-    self.network_conn = pc < self.proba_conn  # Mask - Check if the connectivity probability meets the threshold `proba_conn`
+    self.network_conn = pc < proba_conn  # Mask - Check if the connectivity probability meets the threshold `proba_conn`
     self.network_W = np.random.random(size=(self.n_neurons,self.n_neurons))  # Connectivity weight matrix
     # == FALSE; mark connections lower than probability of presynaptic connection as 0
     self.network_W[self.network_conn == 0] = 0
-    # Normalized to mean conductance (i.e., `mean_w`)
+    # Normalized to mean conductivity (i.e., `mean_w`)
     self.network_W = (self.network_W * 
-                      (self.mean_w / np.mean(self.network_W[self.network_W > 0])))          
+                      (mean_w / np.mean(self.network_W[self.network_W > 0])))          
     self.network_W[self.network_W > 1] = 1
     self.network_W[self.network_W < 0] = 0
 
-  def structured_conn(self,LIF,):
-    self.network_conn = np.zeros([self.n_neurons,self.n_neurons])  
-    dist=np.empty([self.n_neurons,self.n_neurons])
-    dist[:] = np.nan
-    dist1=[]
-    c=[]
-    for f in range(LIF.n_neurons-1):
-      i=f
-      for j in range(f+1,LIF.n_neurons,1):
-        a=(LIF.x[i]-LIF.x[j])*(LIF.x[i]-LIF.x[j])+(LIF.y[i]-LIF.y[j])*(LIF.y[i]-LIF.y[j])+(LIF.z[i]-LIF.z[j])*(LIF.z[i]-LIF.z[j])
-        b=np.sqrt(a)
-        c.append(b)
-      #print('distance between neurons', i+1, 'and', j+1, ': ', b)
-    d=sum(c)/len(c)
-    print('The average distance between neurons in this network is:', d)
-    print('The base of the exponent is:', LIF.p_conn**(1/d))
-    bb=[]
-    cc=[]
-    for p in range(LIF.n_neurons):
-      for p2 in range(LIF.n_neurons):
-        if(p!=p2):
-          a=(LIF.x[p]-LIF.x[p2])*(LIF.x[p]-LIF.x[p2])+(LIF.y[p]-LIF.y[p2])*(LIF.y[p]-LIF.y[p2])+(LIF.z[p]-LIF.z[p2])*(LIF.z[p]-LIF.z[p2])
-          b=np.sqrt(a)
-          dist1.append(b)
-    for p in range(LIF.n_neurons):
-      for p2 in range(LIF.n_neurons):
-        if(p!=p2):
-          a=(LIF.x[p]-LIF.x[p2])*(LIF.x[p]-LIF.x[p2])+(LIF.y[p]-LIF.y[p2])*(LIF.y[p]-LIF.y[p2])+(LIF.z[p]-LIF.z[p2])*(LIF.z[p]-LIF.z[p2])
-          b=np.sqrt(a)
-          #aa=((LIF.p_conn**(1/d)) ** b)
-          aa=2.71828**(-b/(LIF.p_conn*max(dist1)))
-          pc = np.random.random(size=(1,))
-          if(pc<aa):
-            self.network_conn[p][p2] = 1
-            dist[p][p2]=b
-    ## Tony - Verify that this block below is indeed not needed.
-    # self.network_W = np.random.random(size=(self.n_neurons,self.n_neurons))
-    # self.network_W[self.network_conn == 0] = 0
-    # self.network_W = self.network_W/np.mean(self.network_W[self.network_W > 0]) * self.mean_w
-    # self.network_W[self.network_W > 1] = 1
-    # self.network_W[self.network_W < 0] = 0
-    return dist
+  # def structured_conn(self, LIF, mean_w: float=0.5):
+  #   """To connect the neurons according to a seemingly exponential distribution.
+
+  #   NOTE (Tony): 
+  #   I am not entirely clear what the intent is behind this kind of connectivity.
+  #   However, the calculation here is redundant and inefficient, and is O(N^2).
+
+  #   TODO (Tony): 
+  #     - Object method implemented incorrectly and is asking for the lifNetwork object.
+  #     - Fix this method.
+
+  #   Args:
+  #       LIF (_type_): _description_
+  #       mean_w (float, optional): The mean connection weight to normalize each
+  #       connection in the network to. Defaults 0.5.
+
+  #   Returns:
+  #       _type_: _description_
+  #   """
+
+  #   self.network_conn = np.zeros([self.n_neurons,self.n_neurons])  
+  #   dist=np.empty([self.n_neurons,self.n_neurons])
+  #   dist[:] = np.nan
+  #   dist1=[]
+  #   c=[]
+  #   for f in range(LIF.n_neurons-1):
+  #     i=f
+  #     for j in range(f+1,LIF.n_neurons,1):
+  #       a=(LIF.x[i]-LIF.x[j])*(LIF.x[i]-LIF.x[j])+(LIF.y[i]-LIF.y[j])*(LIF.y[i]-LIF.y[j])+(LIF.z[i]-LIF.z[j])*(LIF.z[i]-LIF.z[j])
+  #       b=np.sqrt(a)
+  #       c.append(b)
+  #     #print('distance between neurons', i+1, 'and', j+1, ': ', b)
+  #   d=sum(c)/len(c)
+  #   print('The average distance between neurons in this network is:', d)
+  #   print('The base of the exponent is:', LIF.p_conn**(1/d))
+  #   bb=[]
+  #   cc=[]
+  #   for p in range(LIF.n_neurons):
+  #     for p2 in range(LIF.n_neurons):
+  #       if(p!=p2):
+  #         a=(LIF.x[p]-LIF.x[p2])*(LIF.x[p]-LIF.x[p2])+(LIF.y[p]-LIF.y[p2])*(LIF.y[p]-LIF.y[p2])+(LIF.z[p]-LIF.z[p2])*(LIF.z[p]-LIF.z[p2])
+  #         b=np.sqrt(a)
+  #         dist1.append(b)
+  #   for p in range(LIF.n_neurons):
+  #     for p2 in range(LIF.n_neurons):
+  #       if(p!=p2):
+  #         a=(LIF.x[p]-LIF.x[p2])*(LIF.x[p]-LIF.x[p2])+(LIF.y[p]-LIF.y[p2])*(LIF.y[p]-LIF.y[p2])+(LIF.z[p]-LIF.z[p2])*(LIF.z[p]-LIF.z[p2])
+  #         b=np.sqrt(a)
+  #         #aa=((LIF.p_conn**(1/d)) ** b)
+  #         aa=2.71828**(-b/(LIF.p_conn*max(dist1)))
+  #         pc = np.random.random(size=(1,))
+  #         if(pc<aa):
+  #           self.network_conn[p][p2] = 1
+  #           dist[p][p2]=b
+
+  #   ## TODO (Tony): Verify that this block below is indeed not needed.
+  #   # self.network_W = np.random.random(size=(self.n_neurons,self.n_neurons))
+  #   # self.network_W[self.network_conn == 0] = 0
+  #   # self.network_W = self.network_W/np.mean(self.network_W[self.network_W > 0]) * mean_w
+  #   # self.network_W[self.network_W > 1] = 1
+  #   # self.network_W[self.network_W < 0] = 0
+  #   return dist
 
     
-  def simulate_poisson(self,):
-    """Generate Poisson spike trains.
+  def simulate_poisson(self, 
+                       poisson_noise_lambda_hz: int = 20) -> None:
+    """Calculate and update Poisson spike flags for noise input calculation.
+    
+    The returned NDArray has dimension of 1xn_neurons, with each element
+    corresponding to all possible presynaptic neurons of a postsynaptic neuron.
+    The returned binary flag indiates whether the presynaptic neuron has spiked
+    according to a Poisson distribution.
+
+    Args: 
+      poisson_noise_lambda_hz (int, optional): [Hz] The rate of Poisson 
+        distributed noise spiking. Defaults 20.
     """
-    # NOTES (Tony):
-    # - Poisson frequency is hardcoded as (20 * 0.001 * 0.1) = 20e-4 = 0.002 times 
-    #   per time interval, which is set as dt = 0.1.
-    # - With rate of 2e-3, there is only probability of 2e-3 that a neuron will 
-    #   spike, thus multiplying the value 1 by the boolean values.
-    # - Essentially the same as estimating a Poisson process with Binomial trials,
-    #   thus, may make more sense to just determine spiking with a Binomial random
-    #   variable.
-    
+    # Binom dist p value calculation - Based on suupplied Poisson dist lambda
+    poisson_noise_lambda_kilohz = poisson_noise_lambda_hz/1000  # [Kilo-Hertz] 1 Hz = 0.001 KHz
+    n_per_time_interval = 1/self.dt  # [count] n = 1ms / dt (because time interval is 1ms)
+    binom_proba_poisson_approx = poisson_noise_lambda_kilohz / n_per_time_interval  # Binom Probability = Poisson Lambda / n
 
-    self.poisson_input_flag = 1 * (np.random.rand(self.n_neurons,) < self.poisson_freq)
-  
-  def assaySTDP(self):
-    """Plot the STDP function curve.
+    # Generate Poisson noise spike flags
+    poisson_noise_input_flag = (np.random.rand(self.n_neurons) < binom_proba_poisson_approx)
+    poisson_noise_input_flag = poisson_noise_input_flag * 1  # Convert bool to binary
+
+    self.poisson_noise_input_flag = poisson_noise_input_flag
+
+
+  def assay_stdp(self):
+    """Plot the STDP scheme assay.
 
     Y-axis being the connection weight update (delta w).
     X-axis being the time diff of presynaptic spike timestamp less postsynaptic
@@ -216,7 +251,7 @@ class LIF_Network:
     fig = plt.figure()
 
     for i in range(-100,100,1):
-      plt.scatter(i, self.Delta_W_tau(i, 0, 0), 
+      plt.scatter(i, self.stdp_weight_update(i, 0, 0), 
                   s=2,
                   c='k')
 
@@ -226,7 +261,7 @@ class LIF_Network:
     plt.show()
     self.random_conn()
     
-  def Delta_W_tau(self, time_diff, pre_idx, post_idx):
+  def stdp_weight_update(self, time_diff, pre_idx, post_idx):
     """Update and return connection weight change in STDP scheme.
 
     Spike-timing-dependent plasticity (STDP) scheme by updating the connection
@@ -239,28 +274,28 @@ class LIF_Network:
 
     Returns: 
       dW: Connection weight change with the time diff of time_diff.
-    """
     
-    # NOTES (Tony):
-    # - Nearest neighbor STDP scheme by updating the weights whenever a 
-    #   postsynaptic neuron spikes. 
-    # - Equation (7) in the original paper; however differ in that time_diff is
-    #   used instead of the time_lag as stated in equation 7 of the paper.
-    # - time_diff < 0 is when the presynaptic neuron spikes before the 
-    #   postsynaptic resulting in a potentiation (through connection weight 
-    #   increase) of the two neurons.
-    # - time_diff > 0 is when the presynaptic neuron spikes AFTER the 
-    #   poststynaptic resulting in a depression (through connection weight
-    #   decrease) of the two neurons.
+    NOTE (Tony):
+      - Nearest neighbor STDP scheme by updating the weights whenever a 
+        postsynaptic neuron spikes. 
+      - Equation (7) in the original paper; however differ in that time_diff is
+        used instead of the time_lag as stated in equation 7 of the paper.
+      - time_diff < 0 is when the presynaptic neuron spikes before the 
+        postsynaptic resulting in a potentiation (through connection weight 
+        increase) of the two neurons.
+      - time_diff > 0 is when the presynaptic neuron spikes AFTER the 
+        poststynaptic resulting in a depression (through connection weight
+        decrease) of the two neurons.
 
-    # TODO (TONY): 
-    # - [ ] Modulize out the part of updating the connection weight matrix and 
-    #   keep this method to just calculating the weight change.
+    TODO (Tony): 
+      - [ ] Modulize out the part of updating the connection weight matrix and 
+        keep this method to just calculating the weight change.
 
-    # QUESTIONS (Tony):
-    # - ??? Why use -0.01 and 0.01 instead of zero as stated in eq.7 of the paper?
-    # - ??? Why is the hard bound of [0, 1] used for the weights? (Reason not 
-    #   specified in the paper.)
+    QUESTION (Tony):
+      - ??? Why use -0.01 and 0.01 instead of zero as stated in eq.7 of the paper?
+      - ??? Why is the hard bound of [0, 1] used for the weights? (Reason not 
+        specified in the paper.)
+    """
 
 
     dW = 0
@@ -273,7 +308,7 @@ class LIF_Network:
     ## Case: LTD (Long-term depression)
     if time_diff > 0.01:
       dW = (self.eta 
-            * -(self.stdp_beta/self.stdp_tau_R) 
+            * -(self.stdp_beta/self.stdp_tau_r) 
             * np.exp( -time_diff / self.stdp_tau_neg ))
 
     ## Update connection weight
@@ -285,6 +320,7 @@ class LIF_Network:
 
     return dW
 
+
   def spikeTrain(self,lookBack=None, nNeurons = 5, purge=False):
     """Plot spiketrain plot of specified neuron counts and lookBack range.
 
@@ -292,46 +328,44 @@ class LIF_Network:
       lookback: length of time [ms] to backtrack for plotting the spikeTrain; 
         default None results in the entire time duration.
       nNeurons: number of neurons to plot spike train; should be <= n_neurons 
-        in the LIF_Network; default = 5
+        in the LIF_Network. Defaults 5.
       purge (boolean): Clears the spike record in the LIF_Network object
 
     Returns:
       SR (np.ndarray): n-by-2 ndarray recording the neuron and its spike time. 
+
+    NOTE (Tony): 
+      - Spike record is subsetted to be loopBack onwards.
+      - Interesting way of utilizing argmax to find the first instance of 
+        timestamp matching loopBack.
+      - Spike record: first-column: The i-th neuron,
+                      second-column: Time that spiked.
+      - argmax returns the first instance of matched condition.
+      - np.where returns the indices of items with satisfied conditions if second
+        and third arguments are missing for the function.
+      - The beginning attempt to subset SR with the first instance of condition
+        match can be optimized as this only subsets partially and thus still
+        requires the if-statement in the plotting calls. (Just not optimized.)
+      - lookBack variable name can be better named as the author used the same 
+        variable for two purposes. One to specify the length to look back in time,
+        two to specify the starting point of spiketrain plotting timestamp.
+      - `result` is a list of indices in the spike_record that matches that of 
+        the specified neuron.
+      - The method starts by creating a blank canvas using `plt.plot()` with 
+        arguments such as the number of neurons and then fill in the spiketrain
+        information in subsequent code.
+
+    QUESTION (Tony): 
+      - ??? Why does it delete the first row of spike record?
+        - Answer: The first row was the placeholder placed by object __init__.
+          Since the `simulation` method only appends spike records to the 
+          spike_record variable, the original placeholder is still occupying the 
+          first entry of the variable.
+      - ??? Why is loopBack logic written in such convoluted way?
+        - Answer: This may just be a preference, but the code is unpythonic.
+      - ??? Why is reshaping needed if the spike_record is already in the format?
     """
 
-    # NOTES (Tony): 
-    # - Spike record is subsetted to be loopBack onwards.
-    # - Interesting way of utilizing argmax to find the first instance of 
-    #   timestamp matching loopBack.
-    # - Spike record: first-column: The i-th neuron,
-    #                 second-column: Time that spiked.
-    # - argmax returns the first instance of matched condition.
-    # - np.where returns the indices of items with satisfied conditions if second
-    #   and third arguments are missing for the function.
-    # - The beginning attempt to subset SR with the first instance of condition
-    #   match can be optimized as this only subsets partially and thus still
-    #   requires the if-statement in the plotting calls. (Just not optimized.)
-    # - lookBack variable name can be better named as the author used the same 
-    #   variable for two purposes. One to specify the length to look back in time,
-    #   two to specify the starting point of spiketrain plotting timestamp.
-    # - `result` is a list of indices in the spike_record that matches that of 
-    #   the specified neuron.
-    # - The method starts by creating a blank canvas using `plt.plot()` with 
-    #   arguments such as the number of neurons and then fill in the spiketrain
-    #   information in subsequent code.
-
-    # QUESTIONS (Tony): 
-    # - ??? Why does it delete the first row of spike record?
-    #   - Answer: The first row was the placeholder placed by object __init__.
-    #     Since the `simulation` method only appends spike records to the 
-    #     spike_record variable, the original placeholder is still occupying the 
-    #     first entry of the variable.
-    # - ??? Why is loopBack logic written in such convoluted way?
-    #   - Answer: This may just be a preference, but the code is unpythonic.
-    # - ??? Why is reshaping needed if the spike_record is already in the format?
-
-
-    
     ## lookBack == 0 if None
     if lookBack is None:
       lookBack = self.t
@@ -397,72 +431,71 @@ class LIF_Network:
 
     Returns: 
       r: [radian] Magnitude of the mean Kuramato vectors of all neurons.
+
+    NOTE (Tony):
+      - The variable `lb` should be renamed as the starting point.
+      - 1000 periods if time step (dt) is 0.1 (1000 / 0.1 = 1e4)
+      - Converting the
+      - The held_neuron is a reference neuron that we are referring all other 
+        neurons to. The reference neuron is the reference frame that we compare 
+        other neurons to.
+      - The held_neuron is reset by the starting timestamp so that the held_neuron
+        is viewed in the proper reference with respect to the interval we are
+        looking back to view or plot.
+      - The held_neuron is just the neuron that we are calculating. It is set as
+        the held_neuron when a new neuron is first encountered when iterating 
+        through the sorted spike record.
+      - When held_neuron is reset to the starting timestamp, we are just changing
+        the reference frame to that of the lookBack time interval.
+      - The period of a periodic function is the value at which the function
+        repeat itself, thus we are stating that at value (100 / dt) = 1000 is when 
+        the function repeats.
+      - The case when the ix neuron IS an held_neuron, it is limiting the frame
+        to that specified by the lookBack and then projecting the entire spike
+        acitivity of that neuron onto a single period. Each of the spike would be
+        an arm on the polar coordinate thus has a radian, and this radian is 
+        recorded into the phase_entries array to be later processed.
+      - `myarm` is named because each of the spike can be projected onto the polar
+        coordinate as an arm.
+      - held_neuron is a variable that is outside of the for-loop and is reset 
+        when finished processing all the phases for the previous neuron by setting
+        to the current neuron number (i.e., ix). The phase_entries array is also
+        cleared to make room for the next neuron number.
+      - The phase medians are like each neuron's center of gravity (COG) in the 
+        polar coordinate, however, I am not sure why we are not taking the length
+        from center to the COG into the calculation.
+      - Summing the Euler's equation is equivalent to summing each of the complex
+        numbers representing the Kuramato vector denoting the mean phase of each
+        neuron. Summing each neuron's Kuramato vector and then dividing by the 
+        number of neuron becomes finding the phase mean of all the neurons.
+      - The absolute mean phase in radian is returned because at the midpoint of 
+        the period, the periodic function is just opposite of that of t=0. We do
+        not care whether the mean phase is lagging or ahead of the the periodic
+        function at t=0, thus we only care about the magnitude of the phase, hence
+        taking the absolute value of the mean phase of all neurons.
+      - The cutoff value is tuned to adjust for floating point errors when 
+        calculating the the phase angle using trigonometry. Seen below when
+        finding the phase angle [radian] using scipy's circmean, we are no longer
+        using trigonometry to find the phase angle, thus floating point errors are
+        eliminated.
+
+    QUESTION (Tony):
+      - SR is already in n-rows of length-2 arrays, why do we need to reshape it?
+      - Why is the time length for calculating the period variable fixed at 100ms?
+      - Why add 1 to the priod during linespace creation?
+        - Answer: Because the evenly spaced samples includes the start and 
+          endpoints. For example, if we would like 4 sections, we would need 5 
+          marking points (3x points at the center and then the two ends).
+      - What is held_neuron (smallest neuron in the spike record?)
+      - What unit is the `period` variable? I think it should be ms, but it is not
+        clear if there is even a unit.
+      - Why is the radius/hypotenus or the distance from origin to the COG only
+        filtered at the cutoff of 0.3? What is the significance of 0.3? Why not 
+        consider this distance in calculating the Kuramato vector? 
+      - ??? The `wraps` variable doesn't really make sense as it is dividing
+        lookBack of unit [ms] by period of unit [count], in addition the variable 
+        is not used nor returned, what is the point of this variable?
     """
-
-    # NOTES (Tony):
-    # - The variable `lb` should be renamed as the starting point.
-    # - 1000 periods if time step (dt) is 0.1 (1000 / 0.1 = 1e4)
-    # - Converting the
-    # - The held_neuron is a reference neuron that we are referring all other 
-    #   neurons to. The reference neuron is the reference frame that we compare 
-    #   other neurons to.
-    # - The held_neuron is reset by the starting timestamp so that the held_neuron
-    #   is viewed in the proper reference with respect to the interval we are
-    #   looking back to view or plot.
-    # - The held_neuron is just the neuron that we are calculating. It is set as
-    #   the held_neuron when a new neuron is first encountered when iterating 
-    #   through the sorted spike record.
-    # - When held_neuron is reset to the starting timestamp, we are just changing
-    #   the reference frame to that of the lookBack time interval.
-    # - The period of a periodic function is the value at which the function
-    #   repeat itself, thus we are stating that at value (100 / dt) = 1000 is when 
-    #   the function repeats.
-    # - The case when the ix neuron IS an held_neuron, it is limiting the frame
-    #   to that specified by the lookBack and then projecting the entire spike
-    #   acitivity of that neuron onto a single period. Each of the spike would be
-    #   an arm on the polar coordinate thus has a radian, and this radian is 
-    #   recorded into the phase_entries array to be later processed.
-    # - `myarm` is named because each of the spike can be projected onto the polar
-    #   coordinate as an arm.
-    # - held_neuron is a variable that is outside of the for-loop and is reset 
-    #   when finished processing all the phases for the previous neuron by setting
-    #   to the current neuron number (i.e., ix). The phase_entries array is also
-    #   cleared to make room for the next neuron number.
-    # - The phase medians are like each neuron's center of gravity (COG) in the 
-    #   polar coordinate, however, I am not sure why we are not taking the length
-    #   from center to the COG into the calculation.
-    # - Summing the Euler's equation is equivalent to summing each of the complex
-    #   numbers representing the Kuramato vector denoting the mean phase of each
-    #   neuron. Summing each neuron's Kuramato vector and then dividing by the 
-    #   number of neuron becomes finding the phase mean of all the neurons.
-    # - The absolute mean phase in radian is returned because at the midpoint of 
-    #   the period, the periodic function is just opposite of that of t=0. We do
-    #   not care whether the mean phase is lagging or ahead of the the periodic
-    #   function at t=0, thus we only care about the magnitude of the phase, hence
-    #   taking the absolute value of the mean phase of all neurons.
-    # - The cutoff value is tuned to adjust for floating point errors when 
-    #   calculating the the phase angle using trigonometry. Seen below when
-    #   finding the phase angle [radian] using scipy's circmean, we are no longer
-    #   using trigonometry to find the phase angle, thus floating point errors are
-    #   eliminated.
-
-    # QUESTIONS (Tony):
-    # - SR is already in n-rows of length-2 arrays, why do we need to reshape it?
-    # - Why is the time length for calculating the period variable fixed at 100ms?
-    # - Why add 1 to the priod during linespace creation?
-    #   - Answer: Because the evenly spaced samples includes the start and 
-    #     endpoints. For example, if we would like 4 sections, we would need 5 
-    #     marking points (3x points at the center and then the two ends).
-    # - What is held_neuron (smallest neuron in the spike record?)
-    # - What unit is the `period` variable? I think it should be ms, but it is not
-    #   clear if there is even a unit.
-    # - Why is the radius/hypotenus or the distance from origin to the COG only
-    #   filtered at the cutoff of 0.3? What is the significance of 0.3? Why not 
-    #   consider this distance in calculating the Kuramato vector? 
-    # - ??? The `wraps` variable doesn't really make sense as it is dividing
-    #   lookBack of unit [ms] by period of unit [count], in addition the variable 
-    #   is not used nor returned, what is the point of this variable?
-
 
     # Convert period and lookback from ms to euler-steps
     if period is None:
@@ -551,15 +584,15 @@ class LIF_Network:
     Returns: 
       r: [radian] Magnitude of the mean Kuramato vectors of all neurons.
 
-    """
     
-    ## TODO (Tony): 
-    # - [ ] Rename the period argument, name is misleading.
+    TODO (Tony): 
+      - [ ] Rename the period argument, name is misleading.
 
-    ## NOTES (Tony): 
-    # - The higher the period value, the higher the resolution in the calculation
-    #  especially when converting to radians. Perhaps period of 100ms is adequate
-    #  as it would divide 2pi into 1000 sections.
+    NOTE (Tony): 
+      - The higher the period value, the higher the resolution in the calculation
+      especially when converting to radians. Perhaps period of 100ms is adequate
+      as it would divide 2pi into 1000 sections.
+    """
 
     # Convert period and lookback from ms to euler-steps
     if period is None:
@@ -610,222 +643,400 @@ class LIF_Network:
     return r
 
 
+  def update_g_noise(self, 
+                     kappa_noise: float, 
+                     method:str = "Ali") -> None:
+    """Run the Dynamic noise conductivity update function.
+
+    Args:
+        kappa_noise (float): _description_
+        method (str, optional): _description_. Defaults to "Ali".
+    """
+    # Generate Poisson noise
+    self.simulate_poisson()
+    poisson_noise_spiked_input_count = np.matmul(self.poisson_noise_spike_flag, self.network_conn)
+
+    # Update conductivity (denoted g) - Integrate inputs from noise and synapses (Equation 6 from paper)
+    if (method=="Tony"):
+      ########## TONY ##########
+      del_g_noise = (-self.g_noise 
+                     + kappa_noise * self.tau_syn * poisson_noise_spiked_input_count) * np.exp(-self.dt/self.tau_syn)
+      self.g_noise = (self.g_noise + del_g_noise)
+    elif (method=="Ali"):
+      ########## ALI ##########
+      self.g_noise = (self.g_noise * np.exp(-self.dt/self.tau_syn) 
+                      + self.g_poisson * self.poisson_noise_spike_flag)  # Poisson conductivity * poisson_input_flag makes sense because poisson_input_flag is binary outcome.
+      
+
+  def update_g_syn(self, 
+                   step: int,
+                   kappa: float, 
+                   external_spiked_input_w_sums, 
+                   method:str = "Ali") -> None: 
+    """Run the Dynamic synaptic conductivity update function.
+
+    Args:
+        step (int): _description_
+        kappa (float): _description_
+        external_spiked_input_w_sums (_type_): _description_
+        method (str, optional): _description_. Defaults to "Ali".
+    """
+    
+    if (method=="Tony"):
+      # Set variables
+      per_neuron_coup_strength = kappa / self.n_neurons # [mS/cm^2] Neuron coupling strength (Network-coupling-strength / number-of-neurons)
+      external_stim_coup_strength = kappa / 5  # Coupling strength of input external inputs (i.e., vibrotactile stimuli); value 5 is arbitrary for a strong coupling strength.
+      del_g_syn = (-self.g_syn 
+                   + per_neuron_coup_strength * self.tau_syn * self.spiked_input_w_sums 
+                   + external_stim_coup_strength * external_spiked_input_w_sums[step, :]) * np.exp(-self.dt/self.tau_syn) 
+      self.g_syn = (self.g_syn + del_g_syn)
+    elif (method=="Ali"):
+      self.g_syn = (self.g_syn * np.exp(-self.dt/self.tau_syn)
+              + kappa/self.n_neurons * self.spiked_input_w_sums)
+      
+
+  def update_v(self, 
+               step: int, 
+               euler_steps: int,
+               I_stim: npt.NDArray,
+               method:str="Ali",
+               capacitance_method:str="Ali") -> None: 
+    """Run the dynamic membrane potential update function.
+
+    Args:
+        step (int): _description_
+        euler_steps (int): _description_
+        I_stim (npt.NDArray): _description_
+        method (str, optional): _description_. Defaults to "Ali".
+        capacitance_method (str, optional): _description_. Defaults to "Ali".
+    """
+
+    # External stimulation current input matrix
+    if (type(I_stim) == np.ndarray):
+      if (I_stim.any() != None): 
+        ...
+    elif I_stim == None:
+      I_stim = np.zeros(shape=(euler_steps, self.n_neurons))
+
+    assert type(I_stim) == np.ndarray, "The I_stim matrix has to be a numpy ndarray."
+
+    # Variable value to use depending on Ali or the Paper's implementation
+    if (capacitance_method == "Ali"):
+      # NOTE: This is how Ali have his code. The tau_m variable doesn't really make sense.
+      #   Discussed with Jesse and can't quite figure it out.
+      capa_rv = self.tau_m        # What Ali used, much fewer network weight updates thus runs much faster  >>>> Jesse recommends Tony to look into STN firing frequency to validate which one to use for PD's STN.
+      # g_leak = 0.02  # MISTAKE!!! ALI DECLARED THIS AS 10!!! NEED TO RESIM!
+      g_leak = self.g_leak_ali  # 10
+    elif capacitance_method == "Paper":
+      # NOTE: This is how the variable is defined in the paper (equation 2)
+      capa_rv = self.capacitance  # What the paper stated, many more network updates and runs VERY SLOW!
+      # g_leak = 10  # MISTAKE!!! ONE OF FOUR OF THE SIMULATION RAN USED THIS VALUE AND TOOK FOREVER. I THINK THIS IS THE REASON!!!
+      g_leak = self.g_leak
+
+
+    # Different ways to update membrane potential
+    if method == "Tony":
+      I_noise = self.g_noise * (self.v_syn - self.v)
+      del_v = (g_leak * (self.v_rest - self.v)
+               + self.g_syn * (self.v_syn - self.v)
+               + I_stim[step, :] 
+               + I_noise) * (self.dt / capa_rv)
+      self.v = (self.v + del_v)
+    elif method == "Matteo":
+      # NOTE: This code is erroneous, may be the reason why Matteo's result is not reproducing Ali's.
+      self.v = self.v + (self.dt/capa_rv) * ((self.v_rest - self.v)
+                              - (self.g_noise + self.g_syn) * self.v)
+    elif method == "Ali":
+      # NOTE: Confusing, but this fits the paper equation, just without I_stim and I_noise
+      # NOTE: Ali eliminated v_rest=0mV and just mvoed the negative sign up the product.
+      self.v = self.v + (self.dt/capa_rv) * (g_leak * (self.v_rest - self.v)
+                              - (self.g_noise + self.g_syn) * self.v)
+    elif method == "Ali_Na_rev_potential":
+      # NOTE: This method was suggested by Jesse when on call discussing about the validity of the function.
+      na_rev_potential = 20  # 20 mV
+      self.v = (self.v + (self.dt/capa_rv) * (g_leak * (self.v_rest - self.v) 
+                                                + (self.g_noise + self.g_syn) * (na_rev_potential - self.v)))
+
+
+  def update_thr(self, 
+                 method:str="Ali") -> None:
+    """Run the dynamic spike threshold computation.
+
+    Args:
+        method (str, optional): _description_. Defaults to "Ali".
+    """
+    # Determine method of dyanmic threshold update implementation
+    if method=="Tony":
+      del_v_thr = (self.v_thr_rest - self.v_thr) * np.exp(-self.dt/self.tau_rf_thr)
+      self.v_thr = (self.v_thr + del_v_thr)
+    elif method=="Ali":
+      self.v_thr = (self.v_thr + self.dt * (self.v_thr_rest - self.v_thr) / self.tau_rf_thr)
+
+
+  def check_if_spike(self) -> None:
+    """Check if neurons spike, and mark them as needing to update connection weight.
+    """
+    spike = ((self.v >= self.v_thr) *   # Met dynamic spiking threshold
+              (self.spike_flag == 0))   # Not in abs_refractory period because not recently spiked
+    
+    self.spike_flag[spike] = 1                   # Mark them as SPIKED!
+    self.w_update_flag[spike] = 1                # Mark them as "Needing to update weight"
+    
+    ## Keep track of spike times
+    self.t_spike1[spike] = self.t_spike2[spike]  # Moves the t_spike2 array into t_spike1 for placeholding
+    self.t_spike2[spike] = self.t                # t_spike2 keeps track of each neuron's most recent spike's timestamp
+
+
+  def spiking(self) -> None:
+    """Simulate the spiking stage with a rectangular spike shape of v_spike for tau_spike ms.
+
+    The paper assumes and uses a rectangular spike shape, however, this only 
+    happens if we are voltage gating instead of spiking due to current input.
+
+    ??? When a postsynaptic neuron spike, is the input from the presynaptic neuron
+    more like a voltage clamp or more like a current? The former would make sense
+    for neurons live in a high resistance extracellular space, however, the latter
+    is more analogous to neurotransmitter transmitting signal from neuron to
+    neuron.
+
+    TODO (Tony):
+      - Check literature if STN neurons are more similar to voltage or current 
+        input (neurotransmitters).
+    """
+
+    # Depolarization phase
+    spiked = (self.spike_flag == 1)
+    self.v[spiked] = self.v_spike         # Rectangle spike shape by setting voltage to V_spike for duration of tau_spike (equation 3)
+    self.v_thr[spiked] = self.v_rf_spike  # Threshold is reset to V_th_spike=0mV right after spiking (equation 3)
+
+    # Hyperpolarization phase
+    in_abs_rf_period = (self.t_spike2 + self.tau_spike) > self.t
+    self.v[(~in_abs_rf_period) * spiked] = self.v_reset  # Rectangular spike end resets potential to -67mV
+    
+    # Reset spike flag tracker
+    self.spike_flag[(~in_abs_rf_period) * spiked] = 0
+
+  def check_presynaptic_spike_arrival(self) -> None:
+    """Checking and updating if spike from presynaptic neurons have arrived.
+
+    This aligns with the Dirac Delta Distribution in equation 4 of the paper.
+    The intent to to check if the last spiking time plus synaptic delay (time
+    it takes a signal to propagate from the presynaptic neuron's soma to the
+    postsynaptic neuron's soma.)
+
+    If so, we then sum up the pre-post weights of all the CONNECTED and 
+    SPIKES THAT HAVE ARRIVED [at postsynaptic soma] for each postsynaptic neuron
+    and this value is used to update the synaptic conductivity.
+    """
+    ## Dirac Delta Distribution (equation 4 in paper)
+    spike_t_diff = self.t - (self.t_spike2 + self.synaptic_delay)  # [n, ] array
+    s_flag = 1.0 * (abs(spike_t_diff) < 0.01)  # 0.01 for floating point errors
+
+    # Presynaptic neurons' weight sum for each neuron
+    self.spiked_input_w_sums = np.matmul(s_flag,
+                                  self.network_W * self.network_conn)
+
+  def run_stdp_on_all_connected_pairs(self, )-> None:
+    ## STDP (Spike-timing-dependent plasticity)
+    ## Note: Iterates over all pairs of connections using double-nested loops
+    if self.w_update_flag.any():
+      for pre_idx in range(self.n_neurons):
+        
+        if (self.w_update_flag[pre_idx] == 1):
+          # Add spike record
+          self.spike_record = np.append(self.spike_record,
+                                        np.array([pre_idx, self.t]))
+
+          for post_idx in range(self.n_neurons):
+
+            # Check last spike of pre-synaptic partners (forward propagation):
+            if self.network_conn[pre_idx][post_idx] == 1:
+              temporal_diff = (self.t_spike2[pre_idx] + self.synaptic_delay 
+                                - self.t_spike2[post_idx])
+
+              if temporal_diff > 0:  # LTD
+                self.dW = self.dW + self.stdp_weight_update(temporal_diff, pre_idx, post_idx)
+              else:                  # LTP (temporal_diff >= 0)
+                # Addresses the case when temporal_diff = 0
+                # NOTE: t_spike1 for neurons that spiked would only differ
+                #       from t_spike2 by dt=0.1
+                temporal_diff = (self.t_spike2[pre_idx] + self.synaptic_delay 
+                                  - self.t_spike1[post_idx])
+                self.dW = self.dW + self.stdp_weight_update(temporal_diff, pre_idx, post_idx)
+
+            # Inform post-synaptic partners about spike (backpropagation):
+            elif self.network_conn[post_idx][pre_idx] == 1:  
+              temporal_diff =  (self.t_spike2[post_idx] + self.synaptic_delay 
+                                - self.t_spike2[pre_idx])
+              self.dW = self.dW + self.stdp_weight_update(temporal_diff, post_idx, pre_idx)
+              # self.stdp_weight_update(temporal_diff, post_idx, pre_idx)
+
   def simulate(self, 
-               sim_duration:float = 1, 
-               epoch_current_input:"np.NDarray" = None):
+               sim_duration: float = 1, 
+               I_stim: npt.NDArray = None,
+               external_spiked_input_w_sums: npt.NDArray = None,
+               kappa: float = 8,
+               kappa_noise: float = 0.026,
+               temp_param:dict=None):
     """Run simulation
 
     Args: 
       sim_duration: [ms] Duration of time in milliseconds.
-      epoch_current_input (ndarray): 
+      I_stim (ndarray): 
         2D ndarray matrix denoting the current input for each neuron per each
         epoch (Euler-step); current in mA.
+      external_spiked_input_w_sums (ndarray): 
+        [mS/cm^2] 2D ndarray matrix denoting the weight sum of spiked and  
+        connected presynaptic neurons for each neuron per epoch. Rows are for 
+        each epoch, and columns for each postsynaptic neuron.
+      kappa (float, optional): Max coupling strength of the network [mS / cm^2].
+        Defaults to 8.
+      kappa_noise (float, optional): Scales noise intensity [mS / cm^2]. 
+        Defaults to 0.026.
 
     Returns: 
-      v_holder (ndarray): 
+      holder_v (ndarray): 
         2D matrix of the membrane potential of each neuron at 
         each epoch (Euler-step).
-      gsyn_holder (ndarray): 
-        2D matrix of the conductance of each neuron at each epoch (Euler-step).
-      pois_holder (ndarray): 
+      holder_g_syn (ndarray): 
+        2D matrix of the conductivity of each neuron at each epoch (Euler-step).
+      holder_poi_noise_flags (ndarray): 
         2D matrix of binary outcomes (spike vs not-spike) of each neuron 
         at each epoch (Euler-step).
-      t_holder (ndarray): Timestamps of each epoch (Euler-step).
-      in_holder (ndarray): 
-        2D matrix of connected presynaptic weight sum for each neuron at 
-        each epoch (Euler-step). Rows are for each epoch, and columns are for
-        each post-synaptic neuron.
-      dW_holder (ndarray): 
+      holder_epoch_timestamps (ndarray): Timestamps of each epoch (Euler-step).
+      holder_spiked_input_w_sums (ndarray): 
+        2D matrix of the weight sum of spiked and connected presynaptic neuron
+        for each neuron at each epoch (Euler-step). 
+        Rows are for each epoch, and columns are for each post-synaptic neuron.
+      holder_dw (ndarray): 
         1D array of the net connection weight change of the entire network 
         at each epoch (Euler-step).
+    
+    NOTES (Tony):
+      - `spike_flag` seems to be an array of n_neuron length that marks whether
+        the neuron has spiked?
+      - The `spike_flag` array marks whether the neurons fired at the specific 
+        time step being iterated through because a neuron cannot be spiking twice
+        at the same time slice (time step).
+      - `sp` is a vector masking the neurons that are ineligible for spiking.
+      - `t_spike1` and `t_spike2` are default to -10000 so that we are able to 
+        filter by timestamp, and -10000 is just an arbitrary number. It can be any
+        negative number IMO because negative timestamp does not exist and is 
+        sufficient for the purpose of filtering by timestamp.
+      - `sp` checking if the `spike_flag` is 0 seems to tell that `spike_flag` 
+        marks whether the neuron is spiking or not. If it has a value of 1, it
+        indicates that it is ineligible to spike, thus even if the membrane
+        potential passes the threshold, it still won't spike. This seems to tell
+        that if a neuron has a FALSE spike_flag, it is in an absolute refractory
+        period and thus can't spike no-matter the membrane potential.
+        - `spike_flag == 0` =?= "neuron in aboslute refractory period"
+      - Upon consideration, the only reason one needs `t_offset * f` is because
+        `spike_flag` is actually tracking whether the neuron is in abs-refractory
+        period and `f` marks the neurons that have `spike_flag == 1`.
+      - Typical abs-refractory periods are 1-2 ms, which matches the code because
+        our timesteps are dt = 0.1ms and thus it probable that multiple timesteps
+        would still be within a neuron's aboslute refractory period.
+      - [ ] Propose changing name of variable `spike_flag` to `abs_rf_flag`.
+      - When the neuron spikes, it's connection weight is also due to update due
+        to the STDP scheme. Thus, we keep track of the connections that needs to
+        be updated with the `w_update_flag`.
+      ` `f` seems similar to `sp` at first but they are drastically different for
+        the following reason.
+        - Each for loop iteration is only one timestep, thus it moves the time by
+          0.1 ms, thus there will be cases when a neuron has not spiked
+          (`sp == 0`), but still in absolute-refractory period (`spike_flag == 1`)
+          thus making the neuron unable to spike again.
+        - For the above reason, I am proposing changing the name `spike_flag` to 
+          `abs_rf_flag` as it helps with the understanding of the code.
+      - `tau_spike` same as `abs_rf_time_length`, in [ms]
+      - ##### I AM WRONG! `spike_flag` should be `rel_rf_flag`,              #####
+        ##### and `t_offset` should be `abs_rf_flag`.                        #####
+      - ##### I AM WRONG AGAIN!!! `spike_flag` should be `rf_flag`           #####
+
+    TODO (Tony):
+      - [ ] Check if Delta_W method has a 0.01 threshold instead of 0 because of 
+        the 0.1 implementation in STDP below. Check the Fortran code for this.
+      - [ ] Optimize the "End of Epoch" section using the step variable of the
+        for-loop.
+      - [ ] Run simulation with kappa = 400, which was found from Ali's Fortran code.
+
+    QUESTION (Tony)
+      - ??? Why was the matrix I declared twice `I = I = np.zeros([n_times, self.n_neurons])`
+      - ??? Why are the voltage thresholds of the neurons that fired (i.e., 
+        `v_thr[f]`) set to the refractory period potential (`v_rf_spike = 0`).
+          - This tells me that this is just a relative refractory period and thus 
+            it is still possible to elicit an AP, just harder because the 
+            threshold is now 0mV instead of -40mV.
+      - ??? `spike_flag == 0` =?= "neuron in aboslute refractory period"
+      - ??? Makes more sense to rename `timesteps` argument as `time` because time
+        divided by timestep (dt) would yield the number of steps. The actual
+        timestamp is being tracked with `self.t` and moved forward with
+        `self.t += self.dt`?
+      - ??? Is the "Informing post-synaptic neuron partner" backpropagation?
     """
-    # NOTES (Tony):
-    # - `spike_flag` seems to be an array of n_neuron length that marks whether
-    #   the neuron has spiked?
-    # - The `spike_flag` array marks whether the neurons fired at the specific 
-    #   time step being iterated through because a neuron cannot be spiking twice
-    #   at the same time slice (time step).
-    # - `sp` is a vector masking the neurons that are ineligible for spiking.
-    # - `t_spike1` and `t_spike2` are default to -10000 so that we are able to 
-    #   filter by timestamp, and -10000 is just an arbitrary number. It can be any
-    #   negative number IMO because negative timestamp does not exist and is 
-    #   sufficient for the purpose of filtering by timestamp.
-    # - `sp` checking if the `spike_flag` is 0 seems to tell that `spike_flag` 
-    #   marks whether the neuron is spiking or not. If it has a value of 1, it
-    #   indicates that it is ineligible to spike, thus even if the membrane
-    #   potential passes the threshold, it still won't spike. This seems to tell
-    #   that if a neuron has a FALSE spike_flag, it is in an absolute refractory
-    #   period and thus can't spike no-matter the membrane potential.
-    #   - `spike_flag == 0` =?= "neuron in aboslute refractory period"
-    # - Upon consideration, the only reason one needs `t_offset * f` is because
-    #   `spike_flag` is actually tracking whether the neuron is in abs-refractory
-    #   period and `f` marks the neurons that have `spike_flag == 1`.
-    # - Typical abs-refractory periods are 1-2 ms, which matches the code because
-    #   our timesteps are dt = 0.1ms and thus it probable that multiple timesteps
-    #   would still be within a neuron's aboslute refractory period.
-    # - [ ] Propose changing name of variable `spike_flag` to `abs_rf_flag`.
-    # - When the neuron spikes, it's connection weight is also due to update due
-    #   to the STDP scheme. Thus, we keep track of the connections that needs to
-    #   be updated with the `w_update_flag`.
-    # ` `f` seems similar to `sp` at first but they are drastically different for
-    #   the following reason.
-    #   - Each for loop iteration is only one timestep, thus it moves the time by
-    #     0.1 ms, thus there will be cases when a neuron has not spiked
-    #     (`sp == 0`), but still in absolute-refractory period (`spike_flag == 1`)
-    #     thus making the neuron unable to spike again.
-    #   - For the above reason, I am proposing changing the name `spike_flag` to 
-    #     `abs_rf_flag` as it helps with the understanding of the code.
-    # - ##### I AM WRONG! `spike_flag` should be `rel_rf_flag`,              #####
-    #   ##### and `t_offset` should be `abs_rf_flag`.                        #####
-    # - `spike_length` same as `abs_rf_time_length`, in [ms]
-    # - ##### I AM WRONG AGAIN!!! `spike_flag` should be `rf_flag`           #####
-
-    # TODO (Tony):
-    # - [ ] Check if Delta_W method has a 0.01 threshold instead of 0 because of 
-    #   the 0.1 implementation in STDP below. Check the Fortran code for this.
-    # - [ ] Optimize the "End of Epoch" section using the step variable of the
-    #   for-loop.
-
-    # QUESTIONS (Tony)
-    # - ??? Why was the matrix I declared twice `I = I = np.zeros([n_times, self.n_neurons])`
-    # - ??? Why are the voltage thresholds of the neurons that fired (i.e., 
-    #   `v_thr[f]`) set to the refractory period potential (`v_rf_spike = 0`).
-    #     - This tells me that this is just a relative refractory period and thus 
-    #       it is still possible to elicit an AP, just harder because the 
-    #       threshold is now 0mV instead of -40mV.
-    # - ??? `spike_flag == 0` =?= "neuron in aboslute refractory period"
-    # - ??? Makes more sense to rename `timesteps` argument as `time` because time
-    #   divided by timestep (dt) would yield the number of steps. The actual
-    #   timestamp is being tracked with `self.t` and moved forward with
-    #   `self.t += self.dt`?
-    # - ??? Is the "Informing post-synaptic neuron partner" backpropagation?
     
 
     euler_steps = int(sim_duration/self.dt)   # Number of Euler-method steps
     euler_step_idx_start = self.t / self.dt  # Euler-step starting index
 
-    ## External input current matrix
-    if epoch_current_input == None:
-      epoch_current_input = np.zeros(shape = [euler_steps, self.n_neurons])
 
-    ## Output variable placeholders
-    t_holder = np.zeros([euler_steps, ])
-    v_holder = np.zeros([euler_steps, self.n_neurons])
-    gsyn_holder = np.zeros([euler_steps, self.n_neurons])
-    pois_holder = np.zeros([euler_steps, self.n_neurons])
-    in_holder = np.zeros([euler_steps, self.n_neurons])
-    dW_holder = np.zeros([euler_steps, ])
+    # Weight sums of external spiked and connected input (conductivity)
+    if external_spiked_input_w_sums == None: 
+      external_spiked_input_w_sums = np.zeros(shape=(euler_steps, self.n_neurons))
 
+    # Output variable placeholders
+    holder_epoch_timestamps = np.zeros((euler_steps, ))
+    holder_v = np.zeros((euler_steps, self.n_neurons))
+    holder_g_syn = np.zeros((euler_steps, self.n_neurons))
+    holder_poi_noise_flags = np.zeros((euler_steps, self.n_neurons))
+    holder_spiked_input_w_sums = np.zeros((euler_steps, self.n_neurons))
+    holder_dw = np.zeros((euler_steps, ))
 
-    ## Euler-step Loop
+    # Euler-step Loop
     for step in range(euler_steps):  # Step-loop: because (time_duration/dt = steps OR sections)
+
+      # Dynamic Function Update Poisson noise's conductivity
+      self.update_g_noise(kappa_noise=kappa_noise, method=temp_param["update_g_noise_method"])  
+      # Dynamic Function Update synaptic conductivity
+      self.update_g_syn(step=step, 
+                        kappa=kappa, 
+                        external_spiked_input_w_sums=external_spiked_input_w_sums, 
+                        method=temp_param["update_g_syn_method"])
+      # Reset variables
+      self.spiked_input_w_sums = np.zeros(self.n_neurons)     # Weight sum of all spiked-connected presynaptic neurons
+      self.w_update_flag = np.zeros(self.n_neurons)           # Connection weight update tracker
+      self.dW = 0                                                  # Net connection weight change per epoch
+      # Dynamic Function Update membrane potential
+      self.update_v(step=step, 
+                    euler_steps=euler_steps,
+                    I_stim = I_stim, 
+                    method=temp_param["update_v_method"], 
+                    capacitance_method=temp_param["update_v_capacitance_method"])
+      # Dynamic Function Update spike threshold
+      self.update_thr(method=temp_param["update_thr_method"])
       
-      ## Generate poisson inputs
-      self.simulate_poisson()  # Saved in `self.poisson_input_flag`
+      # Check if the neurons spike and mark them as needing to update conn weight
+      self.check_if_spike()
 
-      ## Update Conductance (denoted g) - Integrate inputs from noise and synapses
-      ## Option 1: Non-exponential decay ##
-      # self.noise_g = ((1-self.dt) * self.noise_g + 
-      #                 self.g_poisson * self.poisson_input_flag)
-      # self.syn_g = ((1-self.dt) * self.syn_g + 
-      #               self.per_neuron_coup_strength * self.spiked_input_w_sums)
-      ## Option 2: Exponential decay ##
-      self.noise_g = (self.noise_g * np.exp(-self.dt/self.syn_tau) 
-                      + self.g_poisson * self.poisson_input_flag)  # Poisson conductance * poisson_input_flag makes sense because poisson_input_flag is binary outcome.
-      # >>> Original - Misunderstood the original variable `network_input` as current input into the neuron
-      # self.syn_g = (self.syn_g * np.exp(-self.dt/self.syn_tau)
-      #               + self.per_neuron_coup_strength * self.spiked_input_w_sums
-      #               + self.external_stim_coup_strength * epoch_current_input[step][:])
-      # ===
-      self.syn_g = (self.syn_g * np.exp(-self.dt/self.syn_tau)
-                    + self.per_neuron_coup_strength * self.spiked_input_w_sums)
-      # <<< Fixed - Removed the misunderstood external input matrix
-
-      ## Reset variables
-      self.spiked_input_w_sums = np.zeros([self.n_neurons,])  # Weight sum of all spiked-connected presynaptic neurons
-      self.w_update_flag = np.zeros([self.n_neurons,])        # Connection weight update tracker
-      dW = 0                                                  # Net connection weight change per epoch
-
-      ## Update membrane-potential, spiking-threshold
-      # Dynamic membrane potential
-      self.v = self.v + (self.dt/self.m_tau) * ((self.v_rest - self.v)
-                                    - (self.noise_g + self.syn_g) * self.v)
-      # Dynamic spiking threshold
-      self.v_thr = (self.v_thr
-                    + self.dt 
-                      * (self.v_rf_thr - self.v_thr) 
-                      / self.v_rf_tau)
-
-      ## Depolarizing to meet spiking-threshold
-      spike = ((self.v >= self.v_thr) *  # Met dynamic spiking threshold
-               (self.spike_flag == 0))   # Not in abs_refractory period because not recently spiked
-      self.spike_flag[spike] = 1
-      self.w_update_flag[spike] = 1                # Connection-weight update tracker
-      self.t_spike1[spike] = self.t_spike2[spike]  # Moves the t_spike2 array into t_spike1 for placeholding
-      self.t_spike2[spike] = self.t                # t_spike2 keeps track of each neuron's most recent spike's timestamp
-
-      ## Spiking phase
-      spiked = (self.spike_flag == 1)
-      self.v[spiked] = self.v_spike         # Update membrane potential to AP peak
-      self.v_thr[spiked] = self.v_rf_spike  # Update spiking-threshold to the relative-refractory period threshold
-
-      ## Hyperpolarization phase
-      in_abs_rf_period = (self.t_spike2 + self.spike_length) > self.t
-      self.v[(~in_abs_rf_period) * spiked] = self.v_reset
-      # Reset spike tracker
-      self.spike_flag[(~in_abs_rf_period) * spiked] = 0
+      # Depolarization and Hyperpolarization (rectangular spike shape)
+      self.spiking()
       
+      # Update the variable needed for next step's g_syn calculation
+      self.check_presynaptic_spike_arrival()
 
-      ## Dirac Delta Distribution (equation 4 in paper)
-      spike_t_diff = self.t - (self.t_spike2 + self.synaptic_delay)  # [n, ] array
-      s_flag = 1.0 * (abs(spike_t_diff) < 0.01)  # 0.01 for floating point errors
-      # Presynaptic neurons' weight sum for each neuron
-      self.spiked_input_w_sums = np.matmul(s_flag,
-                                     self.network_W * self.network_conn)
-      
-      ## STDP (Spike-timing-dependent plasticity)
-      ## Note: Iterates over all pairs of connections using double-nested loops
-      if self.w_update_flag.any():
-        for pre_idx in range(self.n_neurons):
-          
-          if (self.w_update_flag[pre_idx] == 1):
-            # Add spike record
-            self.spike_record = np.append(self.spike_record,
-                                          np.array([pre_idx, self.t]))
+      # Updates the network_W and dW
+      self.run_stdp_on_all_connected_pairs()
+     
 
-            for post_idx in range(self.n_neurons):
-
-              # Check last spike of pre-synaptic partners (forward propagation):
-              if self.network_conn[pre_idx][post_idx] == 1:
-                temporal_diff = (self.t_spike2[pre_idx] + self.synaptic_delay 
-                                 - self.t_spike2[post_idx])
-
-                if temporal_diff > 0:  # LTD
-                  dW = dW + self.Delta_W_tau(temporal_diff, pre_idx, post_idx)
-                else:                  # LTP (temporal_diff >= 0)
-                  # Addresses the case when temporal_diff = 0
-                  # NOTE: t_spike1 for neurons that spiked would only differ
-                  #       from t_spike2 by dt=0.1
-                  temporal_diff = (self.t_spike2[pre_idx] + self.synaptic_delay 
-                                   - self.t_spike1[post_idx])
-                  dW = dW + self.Delta_W_tau(temporal_diff, pre_idx, post_idx)
-
-              # Inform post-synaptic partners about spike (backpropagation):
-              elif self.network_conn[post_idx][pre_idx] == 1:  
-                temporal_diff =  (self.t_spike2[post_idx] + self.synaptic_delay 
-                                  - self.t_spike2[pre_idx])
-                dW = dW + self.Delta_W_tau(temporal_diff, post_idx, pre_idx)
-                # self.Delta_W_tau(temporal_diff, post_idx, pre_idx)
-      
       # End of Epoch:
       # NOTE: Used so that multiple simulation runs have continuity.
       tix = int(self.euler_step_idx - euler_step_idx_start)
-      t_holder[tix] = self.t
-      v_holder[tix] = self.v   
-      gsyn_holder[tix] = self.syn_g + self.noise_g
-      pois_holder[tix] = self.poisson_input_flag
-      in_holder[tix] = self.spiked_input_w_sums
-      dW_holder[tix] = dW
+      holder_epoch_timestamps[tix] = self.t
+      holder_v[tix] = self.v   
+      holder_g_syn[tix] = self.g_syn
+      holder_poi_noise_flags[tix] = self.poisson_noise_spike_flag
+      holder_spiked_input_w_sums[tix] = self.spiked_input_w_sums
+      holder_dw[tix] = self.dW
 
       # Increment Euler-step index
       self.euler_step_idx += 1
@@ -833,5 +1044,9 @@ class LIF_Network:
       ## Increment time tracker
       self.t += self.dt
     
-    return v_holder, gsyn_holder, pois_holder, t_holder, in_holder, dW_holder
- 
+    return (holder_v, 
+            holder_g_syn, 
+            holder_poi_noise_flags, 
+            holder_epoch_timestamps, 
+            holder_spiked_input_w_sums, 
+            holder_dw)
