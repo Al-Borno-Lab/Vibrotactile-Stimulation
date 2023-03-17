@@ -38,6 +38,8 @@ class LIF_Network:
                dimensions = [[0,100],[0,100],[0,100]],
                auto_random_connect: bool = True) -> None:
 
+    # Neuron count
+    self.n_neurons = n_neurons
 
     # Values that Ali uses in his codebase
     self.v_spike = 20  # Not in paper, but shows up in Ali's codebase                       # [mV] The voltage that spikes rise to ((AP Peak))
@@ -45,8 +47,6 @@ class LIF_Network:
     self.v_ali = np.random.uniform(low=-10, high=10, size=(self.n_neurons,)) - 45           # [mV] Current membrane potential - Initialized with Unif(-55, -35)
     self.tau_spike = 1                                                                      # [ms] Time for an AP spike, also the length of the absolute refractory period
 
-    # Neuron count
-    self.n_neurons = n_neurons
     
     # Spatial organization
     self.dimensions = dimensions
@@ -1015,25 +1015,25 @@ class LIF_Network:
       self.w_update_flag = np.zeros(self.n_neurons)           # Connection weight update tracker
       self.dW = 0                                                  # Net connection weight change per epoch
       # Dynamic Function Update membrane potential
-      self.update_v(step=step, 
+      timer.time_perf(self.update_v)(step=step, 
                     euler_steps=euler_steps,
                     I_stim = I_stim, 
                     method=temp_param["update_v_method"], 
                     capacitance_method=temp_param["update_v_capacitance_method"])
       # Dynamic Function Update spike threshold
-      self.update_thr(method=temp_param["update_thr_method"])
+      timer.time_perf(self.update_thr)(method=temp_param["update_thr_method"])
       
       # Check if the neurons spike and mark them as needing to update conn weight
-      self.check_if_spike()
+      timer.time_perf(self.check_if_spike)()
 
       # Depolarization and Hyperpolarization (rectangular spike shape)
-      self.spiking()
+      timer.time_perf(self.spiking)()
       
       # Update the variable needed for next step's g_syn calculation
-      self.check_presynaptic_spike_arrival()
+      timer.time_perf(self.check_presynaptic_spike_arrival)()
 
       # Updates the network_W and dW
-      self.run_stdp_on_all_connected_pairs()
+      timer.time_perf(self.run_stdp_on_all_connected_pairs)()
      
 
       # End of Epoch:
