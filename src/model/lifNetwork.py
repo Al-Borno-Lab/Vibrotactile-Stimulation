@@ -7,6 +7,7 @@ from posixpath import join
 import numpy.typing as npt
 import time
 from src.utilities import timer
+from src.model import stdpScheme
 
 class LIF_Network:
   """Leaky Intergrate-and-Fire (LIF) Neuron network model.
@@ -263,7 +264,7 @@ class LIF_Network:
     self.random_conn()
     
   def stdp_weight_update(self, time_diff, pre_idx, post_idx):
-    """Update and return connection weight change in STDP scheme.
+    """Calculate and return connection weight change in STDP scheme.
 
     Spike-timing-dependent plasticity (STDP) scheme by updating the connection
     weights from presynaptic neuron (pre_idx) to postsynaptic neuron (post_idx)
@@ -846,6 +847,15 @@ class LIF_Network:
                                   self.network_W * self.network_conn)
 
   def run_stdp_on_all_connected_pairs(self, )-> None:
+    """Checks all connected pairs and update weights based on STDP scheme.
+
+
+    NOTE (Tony): 
+    - Performance check reveals that this function call takes the longest time
+      among all the functions called by `simulate()`, thus a performance
+      bottlen
+    - FOUND ERROR: THE LOOP IS EVALUATING ALL CONNECTION TWICE BECAUSE OF THE BACKPROPAGATION.
+    """
     ## STDP (Spike-timing-dependent plasticity)
     ## Note: Iterates over all pairs of connections using double-nested loops
     if self.w_update_flag.any():
@@ -862,7 +872,7 @@ class LIF_Network:
             if self.network_conn[pre_idx][post_idx] == 1:
               temporal_diff = (self.t_spike2[pre_idx] + self.synaptic_delay 
                                 - self.t_spike2[post_idx])
-
+              
               if temporal_diff > 0:  # LTD
                 self.dW = self.dW + self.stdp_weight_update(temporal_diff, pre_idx, post_idx)
               else:                  # LTP (temporal_diff >= 0)
@@ -1002,7 +1012,7 @@ class LIF_Network:
 
     # Euler-step Loop
     for step in range(euler_steps):  # Step-loop: because (time_duration/dt = steps OR sections)
-
+      print(step)
       # Dynamic Function Update Poisson noise's conductivity
       self.update_g_noise(kappa_noise=kappa_noise, method=temp_param["update_g_noise_method"])  
       # Dynamic Function Update synaptic conductivity
@@ -1034,6 +1044,10 @@ class LIF_Network:
 
       # Updates the network_W and dW
       timer.time_perf(self.run_stdp_on_all_connected_pairs)()
+      # timer.time_perf(stdpScheme.conn_update_STDP)(self.network_W, self.network_conn,
+      #                             self.w_update_flag, self.synaptic_delay,
+      #                             self.t_spike1, self.t_spike2)
+
      
 
       # End of Epoch:
