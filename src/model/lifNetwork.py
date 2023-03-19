@@ -7,7 +7,7 @@ from posixpath import join
 import numpy.typing as npt
 import time
 from src.utilities import timer
-from src.model import stdpScheme
+# from src.model import stdpScheme
 
 class LIF_Network:
   """Leaky Intergrate-and-Fire (LIF) Neuron network model.
