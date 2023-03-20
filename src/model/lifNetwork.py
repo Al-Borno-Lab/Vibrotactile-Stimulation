@@ -55,7 +55,7 @@ class LIF_Network:
     self.z = np.random.uniform(*dimensions[2], size=self.n_neurons)
 
     # Internal time trackers
-    self.t = 0                                                                              # [ms] Current time 
+    self.t_current = 0                                                                              # [ms] Current time 
     self.dt = 0.1                                                                           # [ms] Timestep length
     self.euler_step_idx = 0                                                                 # [idx] Euler step index
     self.relax_time = 10000                                                                 # [ms] Length of relaxation phase 
@@ -88,8 +88,8 @@ class LIF_Network:
 
     # Internal Trackers
     self.spike_flag = np.zeros(self.n_neurons)                                              # Tracker of whether a neuron spiked
-    self.t_spike1 = np.zeros(self.n_neurons) - 10000                                        # Tracker of spike timestamp; Default to -10000 for mathematical computation convenience; keep track of the previous timestamps of spiked neurons.
-    self.t_spike2 = np.zeros(self.n_neurons) - 10000                                        # Tracker of spike timestamp; Default to -10000 for mathematical computation convenience; keep track of the current timestamps of spiked neurons.
+    self.t_minus_1_spike = np.zeros(self.n_neurons) - 10000                                 # Tracker of spike timestamp; Default to -10000 for mathematical computation convenience; keep track of the previous timestamps of spiked neurons.
+    self.t_minus_0_spike = np.zeros(self.n_neurons) - 10000                                 # Tracker of spike timestamp; Default to -10000 for mathematical computation convenience; keep track of the current timestamps of spiked neurons.
     self.spike_record = np.empty(shape=(1, 2))                                              # Tracker of Spike record recorded as a list: [neuron_number, spike_time]
     self.g_syn = np.zeros(self.n_neurons) + self.g_syn_initial_value                        # Tracker of dynamic synaptic conductivity. Initial value of 0.; equation (2)
     self.g_noise = np.zeros(self.n_neurons)                                                 # Tracker of dynamic noise conductivity
@@ -374,13 +374,13 @@ class LIF_Network:
 
     ## lookBack == 0 if None
     if lookBack is None:
-      lookBack = self.t
-    lookBack = self.t - lookBack  # Spiketrain plot starting timestamp
+      lookBack = self.t_current
+    lookBack = self.t_current - lookBack  # Spiketrain plot starting timestamp
     # ## More pythonic way to accomplish the same thing
     # if lookBack is None:
     #   strt_timestamp = 0
     # else: 
-    #   strt_timestamp = self.t - lookBack 
+    #   strt_timestamp = self.t_current - lookBack 
     # lookBack = strt_timestamp
     
     ## Subsetting spike record since lookBack onwards
@@ -392,7 +392,7 @@ class LIF_Network:
     ## Plotting spike records one neuron at a time
     # %matplotlib inline
     fig = plt.figure()
-    plt.plot([lookBack, self.t],[0,nNeurons],'white')
+    plt.plot([lookBack, self.t_current],[0,nNeurons],'white')
     for i in range(nNeurons):
       result = np.array(np.where(SR[:,0] == i)).flatten()  # indices of i-th neuron
       for q in range(len(result)):
@@ -508,10 +508,10 @@ class LIF_Network:
       period=100  # 100ms
     steps_in_period = period / self.dt  # Number of Euler steps in a period
     if lookback is None:
-      lookback = self.t
+      lookback = self.t_current
     steps_to_lookback = lookback / self.dt
 
-    lb = self.t - steps_to_lookback  # Analysis starting-point timestamp [ms]
+    lb = self.t_current - steps_to_lookback  # Analysis starting-point timestamp [ms]
 
     # Spike record
     SR = np.reshape(self.spike_record,newshape = [-1,2])  
@@ -613,10 +613,10 @@ class LIF_Network:
       period=100  # 100ms
     steps_in_period = period / self.dt  # Number of Euler steps in a period
     if lookback is None:
-      lookback = self.t
+      lookback = self.t_current
     steps_to_lookback = lookback / self.dt
 
-    lb = self.t - steps_to_lookback  # Analysis starting-point timestamp [ms]
+    lb = self.t_current - steps_to_lookback  # Analysis starting-point timestamp [ms]
 
     # Spike record
     SR = np.reshape(self.spike_record,newshape = [-1,2])
@@ -797,8 +797,8 @@ class LIF_Network:
     self.w_update_flag[spike] = 1                # Mark them as "Needing to update weight"
     
     ## Keep track of spike times
-    self.t_spike1[spike] = self.t_spike2[spike]  # Moves the t_spike2 array into t_spike1 for placeholding
-    self.t_spike2[spike] = self.t                # t_spike2 keeps track of each neuron's most recent spike's timestamp
+    self.t_minus_1_spike[spike] = self.t_minus_0_spike[spike]  # Moves the t_minus_0_spike array into t_minus_1_spike for placeholding
+    self.t_minus_0_spike[spike] = self.t_current              # t_minus_0_spike keeps track of each neuron's most recent spike's timestamp
 
 
   def spiking(self) -> None:
@@ -824,7 +824,7 @@ class LIF_Network:
     self.v_thr[spiked] = self.v_rf_spike  # Threshold is reset to V_th_spike=0mV right after spiking (equation 3)
 
     # Hyperpolarization phase
-    in_abs_rf_period = (self.t_spike2 + self.tau_spike) > self.t
+    in_abs_rf_period = (self.t_minus_0_spike + self.tau_spike) > self.t_current
     self.v[(~in_abs_rf_period) * spiked] = self.v_reset  # Rectangular spike end resets potential to -67mV
     
     # Reset spike flag tracker
@@ -843,7 +843,7 @@ class LIF_Network:
     and this value is used to update the synaptic conductivity.
     """
     ## Dirac Delta Distribution (equation 4 in paper)
-    spike_t_diff = self.t - (self.t_spike2 + self.synaptic_delay)  # [n, ] array
+    spike_t_diff = self.t_current - (self.t_minus_0_spike + self.synaptic_delay)  # [n, ] array
     s_flag = 1.0 * (abs(spike_t_diff) < 0.01)  # 0.01 for floating point errors
 
     # Presynaptic neurons' weight sum for each neuron
@@ -868,29 +868,29 @@ class LIF_Network:
         if (self.w_update_flag[pre_idx] == 1):
           # Add spike record
           self.spike_record = np.append(self.spike_record,
-                                        np.array([pre_idx, self.t]))
+                                        np.array([pre_idx, self.t_current]))
 
           for post_idx in range(self.n_neurons):
 
             # Check last spike of pre-synaptic partners (forward propagation):
             if self.network_conn[pre_idx][post_idx] == 1:
-              temporal_diff = (self.t_spike2[pre_idx] + self.synaptic_delay 
-                                - self.t_spike2[post_idx])
+              temporal_diff = (self.t_minus_0_spike[pre_idx] + self.synaptic_delay 
+                                - self.t_minus_0_spike[post_idx])
               
               if temporal_diff > 0:  # LTD
                 self.dW = self.dW + self.stdp_weight_update(temporal_diff, pre_idx, post_idx)
               else:                  # LTP (temporal_diff >= 0)
                 # Addresses the case when temporal_diff = 0
-                # NOTE: t_spike1 for neurons that spiked would only differ
-                #       from t_spike2 by dt=0.1
-                temporal_diff = (self.t_spike2[pre_idx] + self.synaptic_delay 
-                                  - self.t_spike1[post_idx])
+                # NOTE: t_minus_1_spike for neurons that spiked would only differ
+                #       from t_minus_0_spike by dt=0.1
+                temporal_diff = (self.t_minus_0_spike[pre_idx] + self.synaptic_delay 
+                                  - self.t_minus_1_spike[post_idx])
                 self.dW = self.dW + self.stdp_weight_update(temporal_diff, pre_idx, post_idx)
 
             # Inform post-synaptic partners about spike (backpropagation):
             elif self.network_conn[post_idx][pre_idx] == 1:  
-              temporal_diff =  (self.t_spike2[post_idx] + self.synaptic_delay 
-                                - self.t_spike2[pre_idx])
+              temporal_diff =  (self.t_minus_0_spike[post_idx] + self.synaptic_delay 
+                                - self.t_minus_0_spike[pre_idx])
               self.dW = self.dW + self.stdp_weight_update(temporal_diff, post_idx, pre_idx)
               # self.stdp_weight_update(temporal_diff, post_idx, pre_idx)
 
@@ -942,7 +942,7 @@ class LIF_Network:
         time step being iterated through because a neuron cannot be spiking twice
         at the same time slice (time step).
       - `sp` is a vector masking the neurons that are ineligible for spiking.
-      - `t_spike1` and `t_spike2` are default to -10000 so that we are able to 
+      - `t_minus_1_spike` and `t_minus_0_spike` are default to -10000 so that we are able to 
         filter by timestamp, and -10000 is just an arbitrary number. It can be any
         negative number IMO because negative timestamp does not exist and is 
         sufficient for the purpose of filtering by timestamp.
@@ -993,13 +993,13 @@ class LIF_Network:
       - ??? `spike_flag == 0` =?= "neuron in aboslute refractory period"
       - ??? Makes more sense to rename `timesteps` argument as `time` because time
         divided by timestep (dt) would yield the number of steps. The actual
-        timestamp is being tracked with `self.t` and moved forward with
-        `self.t += self.dt`?
+        timestamp is being tracked with `self.t_current` and moved forward with
+        `self.t_current += self.dt`?
       - ??? Is the "Informing post-synaptic neuron partner" backpropagation?
     """
     
     euler_steps = int(sim_duration/self.dt)   # Number of Euler-method steps
-    euler_step_idx_start = self.t / self.dt  # Euler-step starting index
+    euler_step_idx_start = self.t_current / self.dt  # Euler-step starting index
 
 
     # Weight sums of external spiked and connected input (conductivity)
@@ -1050,14 +1050,14 @@ class LIF_Network:
       timer.time_perf(self.run_stdp_on_all_connected_pairs)()
       # timer.time_perf(stdpScheme.conn_update_STDP)(self.network_W, self.network_conn,
       #                             self.w_update_flag, self.synaptic_delay,
-      #                             self.t_spike1, self.t_spike2)
+      #                             self.t_minus_1_spike, self.t_minus_0_spike)
 
      
 
       # End of Epoch:
       # NOTE: Used so that multiple simulation runs have continuity.
       tix = int(self.euler_step_idx - euler_step_idx_start)
-      holder_epoch_timestamps[tix] = self.t
+      holder_epoch_timestamps[tix] = self.t_current
       holder_v[tix] = self.v   
       holder_g_syn[tix] = self.g_syn
       holder_poi_noise_flags[tix] = self.poisson_noise_spike_flag
@@ -1068,7 +1068,7 @@ class LIF_Network:
       self.euler_step_idx += 1
 
       ## Increment time tracker
-      self.t += self.dt
+      self.t_current += self.dt
     
     return (holder_v, 
             holder_g_syn, 
