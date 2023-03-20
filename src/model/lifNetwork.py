@@ -7,7 +7,7 @@ from posixpath import join
 import numpy.typing as npt
 import time
 from src.utilities import timer
-# from src.model import stdpScheme
+
 
 class LIF_Network:
   """Leaky Intergrate-and-Fire (LIF) Neuron network model.
@@ -43,17 +43,16 @@ class LIF_Network:
     self.n_neurons = n_neurons
 
     # Values that Ali uses in his codebase
-    self.v_spike = 20  # Not in paper, but shows up in Ali's codebase                       # [mV] The voltage that spikes rise to ((AP Peak))
+    self.v_spike = 20     # Not in paper, but shows up in Ali's codebase                    # [mV] The voltage that spikes rise to ((AP Peak))
     self.g_leak_ali = 10  # The value Ali used in his code
     self.v_ali = np.random.uniform(low=-10, high=10, size=(self.n_neurons,)) - 45           # [mV] Current membrane potential - Initialized with Unif(-55, -35)
     self.tau_spike = 1                                                                      # [ms] Time for an AP spike, also the length of the absolute refractory period
 
     
     # Spatial organization
-    self.dimensions = dimensions
-    self.x = np.random.uniform(*self.dimensions[0], size=self.n_neurons)
-    self.z = np.random.uniform(*self.dimensions[2], size=self.n_neurons)
-    self.y = np.random.uniform(*self.dimensions[1], size=self.n_neurons)
+    self.x = np.random.uniform(*dimensions[0], size=self.n_neurons)
+    self.y = np.random.uniform(*dimensions[1], size=self.n_neurons)
+    self.z = np.random.uniform(*dimensions[2], size=self.n_neurons)
 
     # Internal time trackers
     self.t = 0                                                                              # [ms] Current time 
@@ -76,9 +75,12 @@ class LIF_Network:
     # Threshold and Membrane Potential are set to following values after spiking ((Equation 3 in paper))
     self.v_reset = -67                                                                      # [mV] Membrane potential right after spikeing ((Hyperpolarization)); equation (3) in paper
     self.v_rf_spike = 0                                                                     # [mV] Threshold during relative refractory period; V_th_spike of equation (3) in paper
-    self.capacitance = 0.001 * np.random.normal(loc=3,                                      # [mF/cm^2] Converted from micro-Farad to mF; equation (2) in paper
-                                                scale=(0.05*3), 
-                                                size=self.n_neurons)
+    # (Paper definition of) Specific Membrane Capacitance
+    capa_rv_norm_mean = 3
+    capa_rv_norm_stdev = 0.05 * capa_rv_norm_mean                                           # Defined by paper
+    self.capacitance = np.random.normal(loc=capa_rv_norm_mean,                              # [microF/cm^2] Equation (2) in paper
+                                        scale=capa_rv_norm_stdev, 
+                                        size=self.n_neurons)
 
     # Input noise of Poisson distribution (input is generated with I = G*V)
     self.g_poisson = 1.3                                                                    # [mS/cm^2] conductivity of the extrinsic poisson inputs
@@ -91,7 +93,6 @@ class LIF_Network:
     self.spike_record = np.empty(shape=(1, 2))                                              # Tracker of Spike record recorded as a list: [neuron_number, spike_time]
     self.g_syn = np.zeros(self.n_neurons) + self.g_syn_initial_value                        # Tracker of dynamic synaptic conductivity. Initial value of 0.; equation (2)
     self.g_noise = np.zeros(self.n_neurons)                                                 # Tracker of dynamic noise conductivity
-    # self.poisson_input_flag = np.zeros(self.n_neurons)                                      # Tracker of Input vector of external noise to each neuron
     self.w_update_flag = np.zeros(self.n_neurons)                                           # Tracker of connetion weight updates. When a neuron spikes, it is flagged as needing update on its connection weight.
     self.spiked_input_w_sums = np.zeros(self.n_neurons)                                     # Tracker of the connected presynaptic weight sum for each neuron (Eq 4: weight * Dirac Delta Distribution)
     self.dW = 0                                                                             # Tracker of change of weight used by `run_stdp_on_all_connected_pairs()`
@@ -105,7 +106,10 @@ class LIF_Network:
     self.stdp_tau_neg = self.stdp_tau_r * self.stdp_tau_plus                                # For the negative half of STDP; equation (7)
     self.eta = 0.02                                                                         # Scales the weight update per spike; 0.02 for "slow STDP"; equation (7)
 
-    # ??? Speculate to be capacitance random value drawn from a normal distribution ???
+    # ??? Speculate to be capacitance random variable drawn from a normal distribution ???
+    # NOTE (Tony): Odd that this has an expected value of 150. Most reserach
+    #   seems to agree that the universal specific membrane capacitance is 
+    #   approx 1 microFarad/cm^2.
     tau_c1 = np.sqrt(-2 * np.log(np.random.random(size=(self.n_neurons,))))                 # ??? membrane time-constant component 1 ??? - Jesse and Tony are unsure what this is 
     tau_c2 = np.cos(2 * np.pi * np.random.random(size=(self.n_neurons,)))                   # ??? membrane time-constant component 2 ??? - Jesse and Tony are unsure what this is  
     self.tau_m = 7.5 * tau_c1 * tau_c2 + 150                                                # ??? Unsure what this is, but through usage seems like the capacitance random-variable in equation (2) (However, values are off...)
