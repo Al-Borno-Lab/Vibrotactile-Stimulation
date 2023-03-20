@@ -836,15 +836,16 @@ class LIF_Network:
     This aligns with the Dirac Delta Distribution in equation 4 of the paper.
     The intent to to check if the last spiking time plus synaptic delay (time
     it takes a signal to propagate from the presynaptic neuron's soma to the
-    postsynaptic neuron's soma.)
+    postsynaptic neuron's soma) has arrived found by finding the the difference
+    between the current time and previous step's time plus delay.
 
-    If so, we then sum up the pre-post weights of all the CONNECTED and 
+    If so, we then sum up the pre-to-post weights of all the CONNECTED and 
     SPIKES THAT HAVE ARRIVED [at postsynaptic soma] for each postsynaptic neuron
     and this value is used to update the synaptic conductivity.
     """
     ## Dirac Delta Distribution (equation 4 in paper)
-    spike_t_diff = self.t_current - (self.t_minus_0_spike + self.synaptic_delay)  # [n, ] array
-    s_flag = 1.0 * (abs(spike_t_diff) < 0.01)  # 0.01 for floating point errors
+    t_diff = self.t_minus_0_spike - (self.t_minus_1_spike + self.synaptic_delay)  # [n, ] array
+    s_flag = 1.0 * (abs(t_diff) < 0.01)  # 0.01 for floating point errors
 
     # Presynaptic neurons' weight sum for each neuron
     self.spiked_input_w_sums = np.matmul(s_flag,
