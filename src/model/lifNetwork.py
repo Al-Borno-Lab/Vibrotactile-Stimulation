@@ -7,7 +7,7 @@ from posixpath import join
 import numpy.typing as npt
 import time
 from src.utilities import timer
-
+import tensorflow as tf
 
 class LIF_Network:
   """Leaky Intergrate-and-Fire (LIF) Neuron network model.
@@ -824,7 +824,7 @@ class LIF_Network:
     self.v_thr[spiked] = self.v_rf_spike  # Threshold is reset to V_th_spike=0mV right after spiking (equation 3)
 
     # Hyperpolarization phase
-    in_abs_rf_period = (self.t_minus_0_spike + self.tau_spike) > self.t_current
+    in_abs_rf_period = (self.t_minus_1_spike + self.tau_spike) > self.t_current
     self.v[(~in_abs_rf_period) * spiked] = self.v_reset  # Rectangular spike end resets potential to -67mV
     
     # Reset spike flag tracker
@@ -848,8 +848,14 @@ class LIF_Network:
     s_flag = 1.0 * (abs(t_diff) < 0.01)  # 0.01 for floating point errors
 
     # Presynaptic neurons' weight sum for each neuron
-    self.spiked_input_w_sums = np.matmul(s_flag,
-                                  self.network_W * self.network_conn)
+    start = time.time()
+    # element_wise = self.network_W * self.network_conn
+    element_wise = np.multiply(self.network_W, self.network_conn)
+    print(f"{' '*15}element-wise calc time: {(time.time()-start)*1000} ms")
+
+    start = time.time()
+    self.spiked_input_w_sums = np.matmul(s_flag, element_wise)
+    print(f"{' '*15}matmul calc time: {(time.time() - start)*1000} ms")
 
   def run_stdp_on_all_connected_pairs(self, )-> None:
     """Checks all connected pairs and update weights based on STDP scheme.
