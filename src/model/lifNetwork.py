@@ -17,24 +17,7 @@ class LIF_Network:
     dimensions: Spatial dimensions for plotting; this plots the neurons in a 
       100x100x100 3D space by default.
     auto_random_connect (bool): Whether to randomly connec the neurons.
-
-  NOTE (Tony): ((Discrepancy between code vs paper)):
-    - tau_m is an odd value and we speculate it to be the capacitance rv from 
-      eqaution (2) of the paper, however, even then, its generated values are
-      off. The paper states the capacitance is drawn from a different dist.
-    - Initial value of membrane potential according to the paper is drawn from
-      unif(-38, -40), however, Ali's code has unif(-55, -35)
-    - Regarding dynamic voltage threshold, it wasn't clear from the paper if 
-      the initial value was set to 0mV or -40mV. However, it seems like from
-      Ali's code, the initial value is -40mV.
-    - tau_spike was mentioned in the paper, but the value wasn't.
-    - Poisson noise distribution was using binomial distribution estimation, 
-      which would break down as the poisson frequency increases, or when n is 
-      small. Changed the implementation to actual Poisson distribution for 
-      robustness.
-    - g_leak in Ali's code is 10, but paper states 0.02
   """
-
   def __init__(self, n_neurons = 1000, 
                dimensions = [[0,100],[0,100],[0,100]],
                auto_random_connect: bool = True) -> None:
@@ -96,8 +79,8 @@ class LIF_Network:
     self.w_update_flag = np.zeros(self.n_neurons)                                           # Tracker of connetion weight updates. When a neuron spikes, it is flagged as needing update on its connection weight.
     self.spiked_input_w_sums = np.zeros(self.n_neurons)                                     # Tracker of the connected presynaptic weight sum for each neuron (Eq 4: weight * Dirac Delta Distribution)
     self.dW = 0                                                                             # Tracker of change of weight used by `run_stdp_on_all_connected_pairs()`
-    self.network_conn = np.zeros([self.n_neurons, self.n_neurons])                          # Tracker of Neuron connection matrix: from row-th neuron to column-th neuron
-    self.network_W = np.random.random(size=(self.n_neurons, self.n_neurons))                # Tracker of Neuron connection weight matrix: from row-th neuron to column-th neuron
+    self.network_conn = 0                                                                   # Tracker of Neuron connection matrix: from row-th neuron to column-th neuron
+    self.network_W = 0                                                                      # Tracker of Neuron connection weight matrix: from row-th neuron to column-th neuron
 
     # STDP paramters
     self.stdp_beta = 1.4                                                                    # Balance factor (ratio of LTD to LTP); equation (7)
@@ -118,7 +101,9 @@ class LIF_Network:
     if auto_random_connect:
       self.random_conn()  # Create random neuron connections
 
-  def random_conn(self, mean_w: float=0.5, proba_conn: float=0.07):
+  def random_conn(self, 
+                  mean_w: float=0.5, 
+                  proba_conn: float=0.07):
     """Randomly create connections between neurons basing on the proba_conn.
 
     Using LIF neuron objects intrinsic probability of presynaptic connections
@@ -133,28 +118,21 @@ class LIF_Network:
           connection in the network to. Defaults 0.5
         proba_conn (float, optional): Probability of connection between neurons.
           Defaults 0.07.
-    
-    NOTE (Tony): 
-      - `pc` is a connectivity probability matrix randomly generated with the 
-        dimension of n_neurons * n_neurons representing the combinations of 
-        connections between the neurons.
-      - Mark the connections that are below the "probability of presynaptic
-        connection" threshold as 0
-      - Normalize to the mean conudctance of synapses.
-      - Set connections with normalized weight greater than 1 as 1; and set 
-        connections with normalized weight less than 0 as 0.
     """
-
-    pc = np.random.random(size=(self.n_neurons,self.n_neurons))  # Connectivity probability matrix
-    self.network_conn = pc < proba_conn  # Mask - Check if the connectivity probability meets the threshold `proba_conn`
-    self.network_W = np.random.random(size=(self.n_neurons,self.n_neurons))  # Connectivity weight matrix
-    # == FALSE; mark connections lower than probability of presynaptic connection as 0
-    self.network_W[self.network_conn == 0] = 0
+    # Generate connectivity matrix
+    self.network_conn = np.random.binomial(n=1, 
+                                           p=proba_conn, 
+                                           size=(self.n_neurons, self.n_neurons))
+    # Generate weight matrix
+    self.network_W = np.random.random(size=(self.n_neurons, self.n_neurons))
+    # Mark non-connected pairs' weight as zero
+    self.network_W = np.multiply(self.network_conn, self.network_W)
     # Normalized to mean conductivity (i.e., `mean_w`)
-    self.network_W = (self.network_W * 
-                      (mean_w / np.mean(self.network_W[self.network_W > 0])))          
-    self.network_W[self.network_W > 1] = 1
-    self.network_W[self.network_W < 0] = 0
+    self.network_W = np.multiply(self.network_W, 
+                                 mean_w / np.mean(self.network_W))
+    # Hard bound weight to [0, 1]
+    self.network_W = np.clip(self.network_W, 
+                             a_min=0, a_max=1)
 
   # def structured_conn(self, LIF, mean_w: float=0.5):
   #   """To connect the neurons according to a seemingly exponential distribution.
@@ -590,24 +568,11 @@ class LIF_Network:
     Returns: 
       r: [radian] Magnitude of the mean Kuramato vectors of all neurons.
 
-    
-    TODO (Tony): 
-      - [ ] Rename the period argument, name is misleading.
-
     NOTE (Tony): 
       - The higher the period value, the higher the resolution in the calculation
       especially when converting to radians. Perhaps period of 100ms is adequate
       as it would divide 2pi into 1000 sections.
     """
-    
-    ## TODO (Tony): 
-    # - [ ] Rename the period argument, name is misleading.
-
-    ## NOTES (Tony): 
-    # - The higher the period value, the higher the resolution in the calculation
-    #  especially when converting to radians. Perhaps period of 100ms is adequate
-    #  as it would divide 2pi into 1000 sections.
-
     # Convert period and lookback from ms to euler-steps
     if period is None:
       period=100  # 100ms
@@ -941,68 +906,6 @@ class LIF_Network:
       holder_dw (ndarray): 
         1D array of the net connection weight change of the entire network 
         at each epoch (Euler-step).
-    
-    NOTES (Tony):
-      - `spike_flag` seems to be an array of n_neuron length that marks whether
-        the neuron has spiked?
-      - The `spike_flag` array marks whether the neurons fired at the specific 
-        time step being iterated through because a neuron cannot be spiking twice
-        at the same time slice (time step).
-      - `sp` is a vector masking the neurons that are ineligible for spiking.
-      - `t_minus_1_spike` and `t_minus_0_spike` are default to -10000 so that we are able to 
-        filter by timestamp, and -10000 is just an arbitrary number. It can be any
-        negative number IMO because negative timestamp does not exist and is 
-        sufficient for the purpose of filtering by timestamp.
-      - `sp` checking if the `spike_flag` is 0 seems to tell that `spike_flag` 
-        marks whether the neuron is spiking or not. If it has a value of 1, it
-        indicates that it is ineligible to spike, thus even if the membrane
-        potential passes the threshold, it still won't spike. This seems to tell
-        that if a neuron has a FALSE spike_flag, it is in an absolute refractory
-        period and thus can't spike no-matter the membrane potential.
-        - `spike_flag == 0` =?= "neuron in aboslute refractory period"
-      - Upon consideration, the only reason one needs `t_offset * f` is because
-        `spike_flag` is actually tracking whether the neuron is in abs-refractory
-        period and `f` marks the neurons that have `spike_flag == 1`.
-      - Typical abs-refractory periods are 1-2 ms, which matches the code because
-        our timesteps are dt = 0.1ms and thus it probable that multiple timesteps
-        would still be within a neuron's aboslute refractory period.
-      - [ ] Propose changing name of variable `spike_flag` to `abs_rf_flag`.
-      - When the neuron spikes, it's connection weight is also due to update due
-        to the STDP scheme. Thus, we keep track of the connections that needs to
-        be updated with the `w_update_flag`.
-      ` `f` seems similar to `sp` at first but they are drastically different for
-        the following reason.
-        - Each for loop iteration is only one timestep, thus it moves the time by
-          0.1 ms, thus there will be cases when a neuron has not spiked
-          (`sp == 0`), but still in absolute-refractory period (`spike_flag == 1`)
-          thus making the neuron unable to spike again.
-        - For the above reason, I am proposing changing the name `spike_flag` to 
-          `abs_rf_flag` as it helps with the understanding of the code.
-      - `tau_spike` same as `abs_rf_time_length`, in [ms]
-      - ##### I AM WRONG! `spike_flag` should be `rel_rf_flag`,              #####
-        ##### and `t_offset` should be `abs_rf_flag`.                        #####
-      - ##### I AM WRONG AGAIN!!! `spike_flag` should be `rf_flag`           #####
-
-    TODO (Tony):
-      - [ ] Check if Delta_W method has a 0.01 threshold instead of 0 because of 
-        the 0.1 implementation in STDP below. Check the Fortran code for this.
-      - [ ] Optimize the "End of Epoch" section using the step variable of the
-        for-loop.
-      - [ ] Run simulation with kappa = 400, which was found from Ali's Fortran code.
-
-    QUESTION (Tony)
-      - ??? Why was the matrix I declared twice `I = I = np.zeros([n_times, self.n_neurons])`
-      - ??? Why are the voltage thresholds of the neurons that fired (i.e., 
-        `v_thr[f]`) set to the refractory period potential (`v_rf_spike = 0`).
-          - This tells me that this is just a relative refractory period and thus 
-            it is still possible to elicit an AP, just harder because the 
-            threshold is now 0mV instead of -40mV.
-      - ??? `spike_flag == 0` =?= "neuron in aboslute refractory period"
-      - ??? Makes more sense to rename `timesteps` argument as `time` because time
-        divided by timestep (dt) would yield the number of steps. The actual
-        timestamp is being tracked with `self.t_current` and moved forward with
-        `self.t_current += self.dt`?
-      - ??? Is the "Informing post-synaptic neuron partner" backpropagation?
     """
     
     euler_steps = int(sim_duration/self.dt)   # Number of Euler-method steps
