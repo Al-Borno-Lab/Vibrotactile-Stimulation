@@ -1,7 +1,7 @@
 # from src.model import lifNetwork as lif
 import src.model as mod
 
-lif_ = mod.LIF_Network(n_neurons=1000)
+lif_ = mod.LIF_Network(n_neurons=700)
 print(lif_)
 
 choose_model_setup = {"update_g_noise_method": "Ali",
@@ -11,4 +11,4 @@ choose_model_setup = {"update_g_noise_method": "Ali",
                       "update_thr_method": "Ali"
                       }
 
-lif_.simulate(temp_param=choose_model_setup)
+lif_.simulate(temp_param=choose_model_setup, sim_duration=2)
