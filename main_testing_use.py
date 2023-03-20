@@ -1,6 +1,8 @@
-from src.model import lifNetwork as lif
+# from src.model import lifNetwork as lif
+import src.model as mod
 
-lif_ = lif.LIF_Network(n_neurons=300)
+lif_ = mod.LIF_Network(n_neurons=1000)
+print(lif_)
 
 choose_model_setup = {"update_g_noise_method": "Ali",
                       "update_g_syn_method": "Ali",
