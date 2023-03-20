@@ -20,8 +20,8 @@ def stdp_scheme_logic(time_diff:float,
         stdp_tau_neg = stdp_tau_r * stdp_tau_plus
 
     # Logic
+    dw = tf.cast(0, tf.float32)
     if (time_diff >= -0.01) | (time_diff <= 0.01):
-        dw = 0
         return dw
     if time_diff < -0.01:  # LTP
         dw = (scale_factor * tf.math.exp( time_diff / stdp_tau_plus))
@@ -80,25 +80,29 @@ def conn_update_STDP(network_w:npt.NDArray, conn_matrix:npt.NDArray,
     t_spike1 = tf.cast(tf.convert_to_tensor(t_spike1), tf.float32)
     t_spike2 = tf.cast(tf.convert_to_tensor(t_spike2), tf.float32)
     syn_delay = tf.cast(tf.convert_to_tensor(syn_delay), tf.float32)
-
-    # Reshape tensors
-    w_update_flag = tf.reshape(w_update_flag, shape=(-1, 1))
-    t_spike1 = tf.reshape(t_spike1, shape=(-1, 1))
-    temporal_diff = t_spike2 + syn_delay - t_spike1
-
-    # Update the network weight matrix
-    updates = conn_matrix * w_update_flag * temporal_diff
-    # fn = lambda time_diff: stdp_scheme_logic(time_diff=time_diff,
-    #                                          **stdp_scheme_param,)
     
-    elems = tf.reshape(updates, shape=(-1, 1))
-    print(tf.shape(elems))
-    dw = tf.map_fn(fn=lambda time_diff: stdp_scheme_logic(time_diff=time_diff,
-                                             **stdp_scheme_param,), 
-                   elems=elems)
-    tf.print(dw)
-    dw = tf.reshape(dw, shape=tf.shape(updates))
-    network_w.assign_add(dw)
+
+    def graph_calculations(network_w, conn_matrix, w_update_flag, t_spike1, t_spike2, syn_delay):
+        print(f"{'>'*10} graph_calculations TRACING {'>'*10}")
+        # Reshape tensors
+        w_update_flag = tf.reshape(w_update_flag, shape=(-1, 1))
+        t_spike1 = tf.reshape(t_spike1, shape=(-1, 1))
+        temporal_diff = t_spike2 + syn_delay - t_spike1
+
+        # Update the network weight matrix
+        updates = conn_matrix * w_update_flag * temporal_diff
+        fn = lambda time_diff: stdp_scheme_logic(time_diff=time_diff,
+                                                **stdp_scheme_param,)
+        
+        elems = tf.reshape(updates, shape=(-1, 1))
+        dw = tf.map_fn(fn=fn, elems=elems)
+
+        dw = tf.reshape(dw, shape=tf.shape(updates))
+        network_w.assign_add(dw)
+
+        return network_w
+
+    network_w = graph_calculations(network_w, conn_matrix, w_update_flag, t_spike1, t_spike2, syn_delay)
 
     # Hard bound connection weights to [1, 0]
     # tf.cond(tf.math.greater(network_w, 1), lambda: 1)
