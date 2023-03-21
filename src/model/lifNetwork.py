@@ -1,4 +1,5 @@
-import matplotlib.pyplot as plt    # MatPlotLib is a plotting package. 
+# import matplotlib.pyplot as plt    # MatPlotLib is a plotting package. 
+import matplotlib.pyplot as plt
 import numpy as np                 # NumPy is a numerical types package.
 from scipy import stats            # ScPy is a scientific computing package. We just want the stats, because Ca2+ imaging is always calculated in z-score.
 from scipy.stats import circmean
@@ -9,6 +10,84 @@ import time
 from src.utilities import timer
 import tensorflow as tf
 
+
+def update_w_matrix(weight_matrix:npt.NDArray, 
+                    dw:float, pre_idx:int, post_idx:int) -> npt.NDArray:
+  """Update and return the inputted matrix.
+
+  Args:
+      weight_matrix (npt.NDArray): _description_
+      dw (float): _description_
+      pre_idx (int): _description_
+      post_idx (int): _description_
+
+  Returns:
+      npt.NDArray: _description_
+  """
+  # Update connection weight
+  weight_matrix[(pre_idx, post_idx)] += dw
+
+  # Hard bound to [1, 0]  
+  np.clip(weight_matrix[(pre_idx, post_idx)], a_min=0, a_max=1)
+
+  return weight_matrix
+
+
+def stdp_dw(time_diff:float, scale_factor:float=0.02, 
+            stdp_beta:float=1.4, tau_r:float=4,
+            tau_plus:float=10, tau_neg:float=None) -> float:
+  """Calculate and return connection weight change according to STDP scheme.
+
+  Scaling factor (eta) scales the weight update per spike.
+  The default values are set forth by the paper Kromer et. al. (DOI 10.1063/5.0015196)
+  and used for the purpose slow STDP and coexistence of desynchronized and 
+  oversynchronized states.
+
+  Args: 
+    time_diff: [ms] t_{pre} - t_{post}
+    scale_factor (float): Scaling factor of the STDP scheme; 0.02 is considered 
+      slow STDP. Defaults to 0.02.
+    stdp_beta (float): The ratio of overall depression area under curve to 
+      potentiation area under curve. Defaults to 1.4
+    tau_r (float): Ratio of tau_neg to tau_plus.
+    tau_plus (float): [ms] STDP decay timescale for LTP.
+    tau_neg (float): [ms] STDP decay timescale for LTD.
+
+  Returns: 
+    dw (float): Connection weight change.
+  """
+  dw = 0
+
+  if (tau_r is None) & (tau_plus is None) & (tau_neg is None):
+    raise Exception("tau_r, tau_plus, tau_neg: two of the three have to be provided.")
+  elif (tau_r is None) & (tau_plus is None):
+    raise Exception("Either tau_r or tau_plus is needed.")
+  elif (tau_plus is None) & (tau_neg is None):
+    raise Exception("Either tau_plus or tau_neg is needed.")
+  elif (tau_neg is None) & (tau_r is None):
+    raise Exception("Either tau_neg or tau_r is needed.")
+  
+  if tau_neg is None:
+    tau_neg = tau_r * tau_plus
+  elif tau_plus is None: 
+    tau_plus = tau_neg / tau_r
+  elif tau_r is None: 
+    tau_r = tau_neg / tau_plus
+
+  ## Case: LTP (Long-term potentiation)
+  if np.less_equal(time_diff, 0):
+    dw = (scale_factor 
+          * np.exp( time_diff / tau_plus))
+  
+  ## Case: LTD (Long-term depression)
+  if np.greater(time_diff, 0):
+    dw = (scale_factor 
+          * -(stdp_beta/tau_r) 
+          * np.exp( -time_diff / tau_neg ))
+
+  return dw
+
+
 def visualize_stdp_scheme_assay():
   """Plot the STDP scheme assay.
 
@@ -17,18 +96,18 @@ def visualize_stdp_scheme_assay():
   spike timestamp. The definition of time_diff is opposite of time_lag (termed
   in the original paper).
   """
-  fig, ax = plt.suplots()
+  fig, ax = plt.subplots()
   x = np.arange(-100, 100, 1)
-  y = stdp_weight_update(x)
-
-  ax.scatter(x=x, y=y)
+  
+  for i in x:
+    ax.scatter(x=i, y=stdp_dw(i), c="black", s=3)
 
   ax.set_title("STDP Scheme Curve")
   ax.set_xlabel("Time offset (Pre-Post)")
   ax.set_ylabel("dw / dt")
 
-  fig.show()
-  plt.close()
+  return fig
+
 
 class LIF_Network:
   """Leaky Intergrate-and-Fire (LIF) Neuron network model.
@@ -218,7 +297,7 @@ class LIF_Network:
   #   # self.network_W[self.network_W < 0] = 0
   #   return dist
 
-    
+
   def simulate_poisson(self, 
                        poisson_noise_lambda_hz: int = 20) -> None:
     """Calculate and update Poisson spike flags for noise input calculation.
@@ -249,68 +328,6 @@ class LIF_Network:
     # Generate Poisson noise spike flags
     self.poisson_noise_spike_flag = np.random.binomial(n=1, p=p_approx,
                                                        size=(self.n_neurons,))
-
-
-
-    
-  def stdp_weight_update(self, time_diff, pre_idx, post_idx):
-    """Calculate and return connection weight change in STDP scheme.
-
-    Spike-timing-dependent plasticity (STDP) scheme by updating the connection
-    weights from presynaptic neuron (pre_idx) to postsynaptic neuron (post_idx)
-
-    Args: 
-      time_diff: t_{pre} - t_{post}; opposite of time_lag.
-      pre_idx: index of the presynaptic neuron.
-      post_idx: index of the postsynaptic neuron.
-
-    Returns: 
-      dW: Connection weight change with the time diff of time_diff.
-    
-    NOTE (Tony):
-      - Nearest neighbor STDP scheme by updating the weights whenever a 
-        postsynaptic neuron spikes. 
-      - Equation (7) in the original paper; however differ in that time_diff is
-        used instead of the time_lag as stated in equation 7 of the paper.
-      - time_diff < 0 is when the presynaptic neuron spikes before the 
-        postsynaptic resulting in a potentiation (through connection weight 
-        increase) of the two neurons.
-      - time_diff > 0 is when the presynaptic neuron spikes AFTER the 
-        poststynaptic resulting in a depression (through connection weight
-        decrease) of the two neurons.
-
-    TODO (Tony): 
-      - [ ] Modulize out the part of updating the connection weight matrix and 
-        keep this method to just calculating the weight change.
-
-    QUESTION (Tony):
-      - ??? Why use -0.01 and 0.01 instead of zero as stated in eq.7 of the paper?
-      - ??? Why is the hard bound of [0, 1] used for the weights? (Reason not 
-        specified in the paper.)
-    """
-
-
-    dW = 0
-
-    ## Case: LTP (Long-term potentiation)
-    if time_diff < -0.01:
-      dW = (self.eta 
-            * np.exp( time_diff / self.stdp_tau_plus ))
-    
-    ## Case: LTD (Long-term depression)
-    if time_diff > 0.01:
-      dW = (self.eta 
-            * -(self.stdp_beta/self.stdp_tau_r) 
-            * np.exp( -time_diff / self.stdp_tau_neg ))
-
-    ## Update connection weight
-    self.network_W[pre_idx][post_idx] = self.network_W[pre_idx][post_idx] + dW
-
-    ## Limit connection weights to hard bound [1, 0]
-    self.network_W[self.network_W > 1] = 1
-    self.network_W[self.network_W < 0] = 0
-
-    return dW
 
 
   def spikeTrain(self,lookBack=None, nNeurons = 5, purge=False):
@@ -846,7 +863,7 @@ class LIF_Network:
       for pre_idx in range(self.n_neurons):
         
         if (self.w_update_flag[pre_idx] == 1):
-          # Add spike record
+          # Add spike record --> MOVE TO SPIKING
           self.spike_record = np.append(self.spike_record,
                                         np.array([pre_idx, self.t_current]))
 
@@ -855,24 +872,17 @@ class LIF_Network:
             # Check last spike of pre-synaptic partners (forward propagation):
             if self.network_conn[pre_idx][post_idx] == 1:
               temporal_diff = (self.t_minus_0_spike[pre_idx] + self.synaptic_delay 
-                                - self.t_minus_0_spike[post_idx])
-              
-              if temporal_diff > 0:  # LTD
-                self.dW = self.dW + self.stdp_weight_update(temporal_diff, pre_idx, post_idx)
-              else:                  # LTP (temporal_diff >= 0)
-                # Addresses the case when temporal_diff = 0
-                # NOTE: t_minus_1_spike for neurons that spiked would only differ
-                #       from t_minus_0_spike by dt=0.1
-                temporal_diff = (self.t_minus_0_spike[pre_idx] + self.synaptic_delay 
-                                  - self.t_minus_1_spike[post_idx])
-                self.dW = self.dW + self.stdp_weight_update(temporal_diff, pre_idx, post_idx)
+                                - self.t_minus_1_spike[post_idx])
+              dw = stdp_dw(temporal_diff)
+              self.dW += dw
+              update_w_matrix(self.network_W, dw, pre_idx, post_idx)
 
-            # Inform post-synaptic partners about spike (backpropagation):
-            elif self.network_conn[post_idx][pre_idx] == 1:  
-              temporal_diff =  (self.t_minus_0_spike[post_idx] + self.synaptic_delay 
-                                - self.t_minus_0_spike[pre_idx])
-              self.dW = self.dW + self.stdp_weight_update(temporal_diff, post_idx, pre_idx)
-              # self.stdp_weight_update(temporal_diff, post_idx, pre_idx)
+            # # Inform post-synaptic partners about spike (backpropagation):
+            # elif self.network_conn[post_idx][pre_idx] == 1:  
+            #   temporal_diff =  (self.t_minus_0_spike[post_idx] + self.synaptic_delay 
+            #                     - self.t_minus_1_spike[pre_idx])
+            #   self.dW = self.dW + self.stdp_weight_update(temporal_diff, post_idx, pre_idx)
+            #   # self.stdp_weight_update(temporal_diff, post_idx, pre_idx)
 
   def simulate(self, 
                sim_duration: float = 1, 
