@@ -9,6 +9,27 @@ import time
 from src.utilities import timer
 import tensorflow as tf
 
+def visualize_stdp_scheme_assay():
+  """Plot the STDP scheme assay.
+
+  Y-axis being the connection weight update (delta w).
+  X-axis being the time diff of presynaptic spike timestamp less postsynaptic
+  spike timestamp. The definition of time_diff is opposite of time_lag (termed
+  in the original paper).
+  """
+  fig, ax = plt.suplots()
+  x = np.arange(-100, 100, 1)
+  y = stdp_weight_update(x)
+
+  ax.scatter(x=x, y=y)
+
+  ax.set_title("STDP Scheme Curve")
+  ax.set_xlabel("Time offset (Pre-Post)")
+  ax.set_ylabel("dw / dt")
+
+  fig.show()
+  plt.close()
+
 class LIF_Network:
   """Leaky Intergrate-and-Fire (LIF) Neuron network model.
 
@@ -230,27 +251,7 @@ class LIF_Network:
                                                        size=(self.n_neurons,))
 
 
-  def assay_stdp(self):
-    """Plot the STDP scheme assay.
 
-    Y-axis being the connection weight update (delta w).
-    X-axis being the time diff of presynaptic spike timestamp less postsynaptic
-    spike timestamp. The definition of time_diff is opposite of time_lag (termed
-    in the original paper).
-    """
-    # %matplotlib inline
-    fig = plt.figure()
-
-    for i in range(-100,100,1):
-      plt.scatter(i, self.stdp_weight_update(i, 0, 0), 
-                  s=2,
-                  c='k')
-
-    plt.ylabel('dW')
-    plt.xlabel('time offset (pre - post)')
-    plt.title('STDP curve')
-    plt.show()
-    self.random_conn()
     
   def stdp_weight_update(self, time_diff, pre_idx, post_idx):
     """Calculate and return connection weight change in STDP scheme.
