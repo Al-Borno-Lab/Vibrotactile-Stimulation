@@ -205,22 +205,29 @@ class LIF_Network:
     The returned NDArray has dimension of 1xn_neurons, with each element
     corresponding to all possible presynaptic neurons of a postsynaptic neuron.
     The returned binary flag indiates whether the presynaptic neuron has spiked
-    according to a Poisson distribution.
+    according to a Binomial distribution.
+
+    The Poisson spike train is here approximated by a binomial distribution. 
+    lambda = n * p
+
+    Instead of simulating across time, we are simulating at each euler-step 
+    snapshot and such is valid because each firing is independent of another.
 
     Args: 
       poisson_noise_lambda_hz (int, optional): [Hz] The rate of Poisson 
         distributed noise spiking. Defaults 20.
     """
-    # Binom dist p value calculation - Based on suupplied Poisson dist lambda
-    poisson_noise_lambda_kilohz = poisson_noise_lambda_hz/1000  # [Kilo-Hertz] 1 Hz = 0.001 KHz
-    n_per_time_interval = 1/self.dt  # [count] n = 1ms / dt (because time interval is 1ms)
-    binom_proba_poisson_approx = poisson_noise_lambda_kilohz / n_per_time_interval  # Binom Probability = Poisson Lambda / n
+    # Convert from Poisson to Binomial
+    n_per_second = 1 / 1e-3 /self.dt # Number of euler-steps per second
+    p_approx = poisson_noise_lambda_hz / n_per_second
+
+    if ((n_per_second > 100) & (p_approx < 0.01)):
+      raise Exception("""time-step is too large causing the Poisson noise binomial estimation to be inaccurate. 
+      See `simulate_poisson` method definition for more details.""")
 
     # Generate Poisson noise spike flags
-    poisson_noise_input_flag = (np.random.rand(self.n_neurons) < binom_proba_poisson_approx)
-    poisson_noise_input_flag = poisson_noise_input_flag * 1  # Convert bool to binary
-
-    self.poisson_noise_input_flag = poisson_noise_input_flag
+    self.poisson_noise_spike_flag = np.random.binomial(n=1, p=p_approx,
+                                                       size=(self.n_neurons,))
 
 
   def assay_stdp(self):
