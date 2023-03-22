@@ -11,26 +11,7 @@ from src.utilities import timer
 import tensorflow as tf
 
 
-def update_w_matrix(weight_matrix:npt.NDArray, 
-                    dw:float, pre_idx:int, post_idx:int) -> npt.NDArray:
-  """Update and return the inputted matrix.
 
-  Args:
-      weight_matrix (npt.NDArray): _description_
-      dw (float): _description_
-      pre_idx (int): _description_
-      post_idx (int): _description_
-
-  Returns:
-      npt.NDArray: _description_
-  """
-  # Update connection weight
-  weight_matrix[(pre_idx, post_idx)] += dw
-
-  # Hard bound to [1, 0]  
-  np.clip(weight_matrix[(pre_idx, post_idx)], a_min=0, a_max=1)
-
-  return weight_matrix
 
 
 def stdp_dw(time_diff:float, scale_factor:float=0.02, 
@@ -313,8 +294,6 @@ class LIF_Network:
     
     # Hard bound to [1, 0]  
     np.clip(self.network_conn[(pre_idx, post_idx)], a_min=0, a_max=1)
-
-
 
   def simulate_poisson(self, 
                        poisson_noise_lambda_hz: int = 20) -> None:
