@@ -179,7 +179,7 @@ class LIF_Network:
     self.w_update_flag = np.zeros(self.n_neurons)                                           # Tracker of connetion weight updates. When a neuron spikes, it is flagged as needing update on its connection weight.
     self.spiked_input_w_sums = np.zeros(self.n_neurons)                                     # Tracker of the connected presynaptic weight sum for each neuron (Eq 4: weight * Dirac Delta Distribution)
     self.dW = 0                                                                             # Tracker of change of weight used by `run_stdp_on_all_connected_pairs()`
-    self.network_conn = 0                                                                   # Tracker of Neuron connection matrix: from row-th neuron to column-th neuron
+    self.network_conn = np.zeros((self.n_neurons, self.n_neurons))                          # Tracker of Neuron connection matrix: from row-th neuron to column-th neuron
     self.network_W = 0                                                                      # Tracker of Neuron connection weight matrix: from row-th neuron to column-th neuron
 
     # STDP paramters
@@ -199,40 +199,9 @@ class LIF_Network:
     
     # Generate neuron connection matrix
     if auto_random_connect:
-      self.random_conn()  # Create random neuron connections
+      self.__random_conn()  # Create random neuron connections
 
-  def random_conn(self, 
-                  mean_w: float=0.5, 
-                  proba_conn: float=0.07):
-    """Randomly create connections between neurons basing on the proba_conn.
-
-    Using LIF neuron objects intrinsic probability of presynaptic connections
-    from other neurons (`proba_conn`), and then mean conductivity of synapses 
-    (mean_w) to normalize the randomly generated value.
-
-    Update `network_W` matrix to binary values indicating the connections
-    between neurons.
-
-    Args:
-        mean_w (float, optional): The mean connection weight to normalize each  
-          connection in the network to. Defaults 0.5
-        proba_conn (float, optional): Probability of connection between neurons.
-          Defaults 0.07.
-    """
-    # Generate connectivity matrix
-    self.network_conn = np.random.binomial(n=1, 
-                                           p=proba_conn, 
-                                           size=(self.n_neurons, self.n_neurons))
-    # Generate weight matrix
-    self.network_W = np.random.random(size=(self.n_neurons, self.n_neurons))
-    # Mark non-connected pairs' weight as zero
-    self.network_W = np.multiply(self.network_conn, self.network_W)
-    # Normalized to mean conductivity (i.e., `mean_w`)
-    self.network_W = np.multiply(self.network_W, 
-                                 mean_w / np.mean(self.network_W))
-    # Hard bound weight to [0, 1]
-    self.network_W = np.clip(self.network_W, 
-                             a_min=0, a_max=1)
+  
 
   # def structured_conn(self, LIF, mean_w: float=0.5):
   #   """To connect the neurons according to a seemingly exponential distribution.
@@ -297,6 +266,41 @@ class LIF_Network:
   #   # self.network_W[self.network_W < 0] = 0
   #   return dist
 
+  def __random_conn(self, mean_w: float=0.5, proba_conn: float=0.07) -> None:
+    """Randomly create connections between neurons basing on the proba_conn.
+
+    Using LIF neuron objects intrinsic probability of presynaptic connections
+    from other neurons (`proba_conn`), and then mean conductivity of synapses 
+    (mean_w) to normalize the randomly generated value.
+
+    Update `network_W` matrix to binary values indicating the connections
+    between neurons.
+
+    Args:
+        mean_w (float, optional): The mean connection weight to normalize each  
+          connection in the network to. Defaults 0.5
+        proba_conn (float, optional): Probability of connection between neurons.
+          Defaults 0.07.
+    """
+    # Ensure mean_w is in (0, 1) as any other value does not make sense.
+    assert (np.greater(mean_w, 0) & np.less(mean_w, 1)), \
+      f"mean_w has be within (0, 1) (exclusive). Current mean_w: {mean_w}"
+
+    # Generate connectivity matrix - Because none is connected at initialization
+    self.network_conn = np.random.binomial(n=1, p=proba_conn, 
+                                           size=(self.n_neurons, self.n_neurons))
+    # Generate weight matrix
+    self.network_W = np.random.random(size=(self.n_neurons, self.n_neurons))
+    # Mark non-connected pairs' weight as zero
+    self.network_W = np.multiply(self.network_conn, self.network_W)
+    # Normalized to mean conductivity (i.e., `mean_w`)
+    self.network_W = np.multiply(self.network_W, 
+                                 mean_w / np.mean(self.network_W))
+    
+    # Hard bound weight to [0, 1]
+    # self.network_W = np.clip(self.network_W, 
+    #                          a_min=0, a_max=1)
+    
   def __update_w_matrix(self, dw:float, pre_idx:int, post_idx:int) -> None:
     """Updates object's connection weight matrix in-place.
 
@@ -309,6 +313,7 @@ class LIF_Network:
     
     # Hard bound to [1, 0]  
     np.clip(self.network_conn[(pre_idx, post_idx)], a_min=0, a_max=1)
+
 
 
   def simulate_poisson(self, 
