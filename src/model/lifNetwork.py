@@ -297,6 +297,19 @@ class LIF_Network:
   #   # self.network_W[self.network_W < 0] = 0
   #   return dist
 
+  def __update_w_matrix(self, dw:float, pre_idx:int, post_idx:int) -> None:
+    """Updates object's connection weight matrix in-place.
+
+    This is a "private" method, and is done so for the reason that it modifies 
+    the object attribute in-place instead of returning a copy of the updated
+    variable.
+    """
+    # Update connection weight
+    self.network_conn[(pre_idx, post_idx)] += dw
+    
+    # Hard bound to [1, 0]  
+    np.clip(self.network_conn[(pre_idx, post_idx)], a_min=0, a_max=1)
+
 
   def simulate_poisson(self, 
                        poisson_noise_lambda_hz: int = 20) -> None:
