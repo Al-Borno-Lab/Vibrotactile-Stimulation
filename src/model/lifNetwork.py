@@ -9,86 +9,7 @@ import numpy.typing as npt
 import time
 from src.utilities import timer
 import tensorflow as tf
-
-
-
-
-
-def stdp_dw(time_diff:float, scale_factor:float=0.02, 
-            stdp_beta:float=1.4, tau_r:float=4,
-            tau_plus:float=10, tau_neg:float=None) -> float:
-  """Calculate and return connection weight change according to STDP scheme.
-
-  Scaling factor (eta) scales the weight update per spike.
-  The default values are set forth by the paper Kromer et. al. (DOI 10.1063/5.0015196)
-  and used for the purpose slow STDP and coexistence of desynchronized and 
-  oversynchronized states.
-
-  Args: 
-    time_diff: [ms] t_{pre} - t_{post}
-    scale_factor (float): Scaling factor of the STDP scheme; 0.02 is considered 
-      slow STDP. Defaults to 0.02.
-    stdp_beta (float): The ratio of overall depression area under curve to 
-      potentiation area under curve. Defaults to 1.4
-    tau_r (float): Ratio of tau_neg to tau_plus.
-    tau_plus (float): [ms] STDP decay timescale for LTP.
-    tau_neg (float): [ms] STDP decay timescale for LTD.
-
-  Returns: 
-    dw (float): Connection weight change.
-  """
-  dw = 0
-
-  if (tau_r is None) & (tau_plus is None) & (tau_neg is None):
-    raise Exception("tau_r, tau_plus, tau_neg: two of the three have to be provided.")
-  elif (tau_r is None) & (tau_plus is None):
-    raise Exception("Either tau_r or tau_plus is needed.")
-  elif (tau_plus is None) & (tau_neg is None):
-    raise Exception("Either tau_plus or tau_neg is needed.")
-  elif (tau_neg is None) & (tau_r is None):
-    raise Exception("Either tau_neg or tau_r is needed.")
-  
-  if tau_neg is None:
-    tau_neg = tau_r * tau_plus
-  elif tau_plus is None: 
-    tau_plus = tau_neg / tau_r
-  elif tau_r is None: 
-    tau_r = tau_neg / tau_plus
-
-  ## Case: LTP (Long-term potentiation)
-  if np.less_equal(time_diff, 0):
-    dw = (scale_factor 
-          * np.exp( time_diff / tau_plus))
-  
-  ## Case: LTD (Long-term depression)
-  if np.greater(time_diff, 0):
-    dw = (scale_factor 
-          * -(stdp_beta/tau_r) 
-          * np.exp( -time_diff / tau_neg ))
-
-  return dw
-
-
-def visualize_stdp_scheme_assay():
-  """Plot the STDP scheme assay.
-
-  Y-axis being the connection weight update (delta w).
-  X-axis being the time diff of presynaptic spike timestamp less postsynaptic
-  spike timestamp. The definition of time_diff is opposite of time_lag (termed
-  in the original paper).
-  """
-  fig, ax = plt.subplots()
-  x = np.arange(-100, 100, 1)
-  
-  for i in x:
-    ax.scatter(x=i, y=stdp_dw(i), c="black", s=3)
-
-  ax.set_title("STDP Scheme Curve")
-  ax.set_xlabel("Time offset (Pre-Post)")
-  ax.set_ylabel("dw / dt")
-
-  return fig
-
+import stdpScheme
 
 class LIF_Network:
   """Leaky Intergrate-and-Fire (LIF) Neuron network model.
@@ -870,9 +791,11 @@ class LIF_Network:
             if self.network_conn[pre_idx][post_idx] == 1:
               temporal_diff = (self.t_minus_0_spike[pre_idx] + self.synaptic_delay 
                                 - self.t_minus_1_spike[post_idx])
-              dw = stdp_dw(temporal_diff)
+              dw = stdpScheme.stdp_dw(temporal_diff, scale_factor=self.eta, 
+                                      stdp_beta=self.stdp_beta, tau_r=self.stdp_tau_r,
+                                      tau_plus=self.stdp_tau_plus, tau_neg=self.stdp_tau_neg)
               self.dW += dw
-              update_w_matrix(self.network_W, dw, pre_idx, post_idx)
+              self.__update_w_matrix(self.network_W, dw, pre_idx, post_idx)
 
             # # Inform post-synaptic partners about spike (backpropagation):
             # elif self.network_conn[post_idx][pre_idx] == 1:  
