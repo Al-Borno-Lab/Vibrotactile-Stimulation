@@ -9,7 +9,7 @@ import numpy.typing as npt
 import time
 from src.utilities import timer
 import tensorflow as tf
-import stdpScheme
+from src.model import stdpScheme
 
 class LIF_Network:
   """Leaky Intergrate-and-Fire (LIF) Neuron network model.
@@ -240,7 +240,7 @@ class LIF_Network:
     n_per_second = 1 / 1e-3 /self.dt # Number of euler-steps per second
     p_approx = poisson_noise_lambda_hz / n_per_second
 
-    if ((n_per_second > 100) & (p_approx < 0.01)):
+    if not ((n_per_second > 100) & (p_approx < 0.01)):
       raise Exception("""time-step is too large causing the Poisson noise binomial estimation to be inaccurate. 
       See `simulate_poisson` method definition for more details.""")
 
@@ -249,89 +249,51 @@ class LIF_Network:
                                                        size=(self.n_neurons,))
 
 
-  def spikeTrain(self,lookBack=None, nNeurons = 5, purge=False):
+  def spikeTrain(self, lookBack:float=None, first_n_neurons:int=5, purge:bool=False):
     """Plot spiketrain plot of specified neuron counts and lookBack range.
 
     Args: 
       lookback: length of time [ms] to backtrack for plotting the spikeTrain; 
         default None results in the entire time duration.
-      nNeurons: number of neurons to plot spike train; should be <= n_neurons 
+      first_n_neurons: number of neurons to plot spike train; should be <= n_neurons 
         in the LIF_Network. Defaults 5.
       purge (boolean): Clears the spike record in the LIF_Network object
 
     Returns:
       SR (np.ndarray): n-by-2 ndarray recording the neuron and its spike time. 
-
-    NOTE (Tony): 
-      - Spike record is subsetted to be loopBack onwards.
-      - Interesting way of utilizing argmax to find the first instance of 
-        timestamp matching loopBack.
-      - Spike record: first-column: The i-th neuron,
-                      second-column: Time that spiked.
-      - argmax returns the first instance of matched condition.
-      - np.where returns the indices of items with satisfied conditions if second
-        and third arguments are missing for the function.
-      - The beginning attempt to subset SR with the first instance of condition
-        match can be optimized as this only subsets partially and thus still
-        requires the if-statement in the plotting calls. (Just not optimized.)
-      - lookBack variable name can be better named as the author used the same 
-        variable for two purposes. One to specify the length to look back in time,
-        two to specify the starting point of spiketrain plotting timestamp.
-      - `result` is a list of indices in the spike_record that matches that of 
-        the specified neuron.
-      - The method starts by creating a blank canvas using `plt.plot()` with 
-        arguments such as the number of neurons and then fill in the spiketrain
-        information in subsequent code.
-
-    QUESTION (Tony): 
-      - ??? Why does it delete the first row of spike record?
-        - Answer: The first row was the placeholder placed by object __init__.
-          Since the `simulation` method only appends spike records to the 
-          spike_record variable, the original placeholder is still occupying the 
-          first entry of the variable.
-      - ??? Why is loopBack logic written in such convoluted way?
-        - Answer: This may just be a preference, but the code is unpythonic.
-      - ??? Why is reshaping needed if the spike_record is already in the format?
     """
 
-    ## lookBack == 0 if None
     if lookBack is None:
-      lookBack = self.t_current
-    lookBack = self.t_current - lookBack  # Spiketrain plot starting timestamp
-    # ## More pythonic way to accomplish the same thing
-    # if lookBack is None:
-    #   strt_timestamp = 0
-    # else: 
-    #   strt_timestamp = self.t_current - lookBack 
-    # lookBack = strt_timestamp
+      strt_timestamp = 0
+    else: 
+      strt_timestamp = self.t_current - lookBack 
     
-    ## Subsetting spike record since lookBack onwards
-    SR = np.reshape(self.spike_record,newshape = [-1,2])
-    SR = np.delete(SR, 0, 0)               # Delete first row - the placeholder
-    SRix = np.argmax(SR[:,1] >= lookBack)  # idx of first SR since timestamp == loopBack
-    SR = SR[SRix:,:]                       # Subset using index
+    # Subsetting spike record since strt_timestamp onwards
+    spike_record = np.reshape(self.spike_record,newshape = [-1,2])
+    spike_record = np.delete(spike_record, obj=0, axis=0)               # Delete first row - the placeholder
+    idx_spike_record = np.argmax(spike_record[:, 1] >= strt_timestamp)  # idx of first spike_record since timestamp == loopBack
+    spike_record = spike_record[idx_spike_record:, :]                   # Lookback subset (NDarray View)
+    spike_record = spike_record[spike_record[:, 0] <= first_n_neurons]  # first_n_neuron subset
     
-    ## Plotting spike records one neuron at a time
-    # %matplotlib inline
-    fig = plt.figure()
-    plt.plot([lookBack, self.t_current],[0,nNeurons],'white')
-    for i in range(nNeurons):
-      result = np.array(np.where(SR[:,0] == i)).flatten()  # indices of i-th neuron
-      for q in range(len(result)):
-        loc = result[q]
-        if (SR[loc,1]) >= lookBack:  # SR's second column is the spiking time
-          plt.plot([SR[loc,1], SR[loc,1]],[i,i+.9],'k',linewidth=.5)
+    # Plot 
+    fig, ax = plt.subplots()
+    ax.plot([strt_timestamp, self.t_current], [0, first_n_neurons], "white")
+    for entry in spike_record:
+      x_min, x_max = entry[1], entry[1]
+      y_min, y_max = entry[0], entry[0] + 0.9
+      ax.plot((x_min, x_max), (y_min, y_max), 'k', linewidth=0.5)
     
-    plt.xlabel('time (ms)')
-    plt.ylabel('neuron #')
-    plt.title("Spike Train")
+    ax.set_xlabel("time (ms)")
+    ax.set_ylabel("neuron #")
+    ax.set_title("Spike Train")
     fig.set_size_inches(5, 4)
     plt.show()
 
+    # Purge spike record by releasing it for garbage collection
     if purge:
       self.spike_record = np.empty(shape=[1,2])
     
-    return SR
+    return spike_record
 
   def vect_kuramato(self,
                     period: float = None,
@@ -487,7 +449,6 @@ class LIF_Network:
     r = np.abs(z)  # Only care about the magnitude
     return r  # Mean phase of all neurons in [radian]
 
-  
   def kuramato(self,
                period:float=None,
                lookback:float=None):
@@ -796,7 +757,7 @@ class LIF_Network:
                                       stdp_beta=self.stdp_beta, tau_r=self.stdp_tau_r,
                                       tau_plus=self.stdp_tau_plus, tau_neg=self.stdp_tau_neg)
               self.dW += dw
-              self.__update_w_matrix(self.network_W, dw, pre_idx, post_idx)
+              self.__update_w_matrix(dw, pre_idx, post_idx)
 
             # # Inform post-synaptic partners about spike (backpropagation):
             # elif self.network_conn[post_idx][pre_idx] == 1:  
