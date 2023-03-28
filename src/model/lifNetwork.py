@@ -80,7 +80,7 @@ class LIF_Network:
     self.g_noise = np.zeros(self.n_neurons)                                                 # Tracker of dynamic noise conductivity
     self.w_update_flag = np.zeros(self.n_neurons)                                           # Tracker of connetion weight updates. When a neuron spikes, it is flagged as needing update on its connection weight.
     self.spiked_input_w_sums = np.zeros(self.n_neurons)                                     # Tracker of the connected presynaptic weight sum for each neuron (Eq 4: weight * Dirac Delta Distribution)
-    self.dW = 0                                                                             # Tracker of change of weight used by `run_stdp_on_all_connected_pairs()`
+    self.dW = 0                                                                             # Tracker of change of weight used by `__run_stdp_on_all_connected_pairs()`
     self.network_conn = np.zeros((self.n_neurons, self.n_neurons))                          # Tracker of Neuron connection matrix: from row-th neuron to column-th neuron
     self.network_W = 0                                                                      # Tracker of Neuron connection weight matrix: from row-th neuron to column-th neuron
 
@@ -727,44 +727,106 @@ class LIF_Network:
     self.spiked_input_w_sums = np.matmul(s_flag, element_wise)
     print(f"{' '*15}matmul calc time: {(time.time() - start)*1000} ms")
 
-  def run_stdp_on_all_connected_pairs(self, )-> None:
+  def __run_stdp_on_all_connected_pairs(self, )-> None:
     """Checks all connected pairs and update weights based on STDP scheme.
 
+    This double-nested for-loop checks through all pairs, and the four cases 
+    (A, B, C, D) allows for checking of a spiked neuron's pre- and post-synaptic
+    partners. 
 
-    NOTE (Tony): 
-    - Performance check reveals that this function call takes the longest time
-      among all the functions called by `simulate()`, thus a performance
-      bottlen
-    - FOUND ERROR: THE LOOP IS EVALUATING ALL CONNECTION TWICE BECAUSE OF THE BACKPROPAGATION.
+    Case B is specifically for when synaptic delay = 0, which usually would not
+    happen in our current model as all neurons in this current model are 
+    homogenous.
     """
-    ## STDP (Spike-timing-dependent plasticity)
-    ## Note: Iterates over all pairs of connections using double-nested loops
-    if self.w_update_flag.any():
-      for pre_idx in range(self.n_neurons):
-        
-        if (self.w_update_flag[pre_idx] == 1):
-          # Add spike record --> MOVE TO SPIKING
-          self.spike_record = np.append(self.spike_record,
-                                        np.array([pre_idx, self.t_current]))
+    if not self.w_update_flag.any():
+      return
 
-          for post_idx in range(self.n_neurons):
+    for i in range(self.n_neurons):
+      if (self.w_update_flag[i] == 1):  ### SPOTLIGHT ###
+        self.spike_record = np.append(self.spike_record,np.array([i, self.t_current]))
 
-            # Check last spike of pre-synaptic partners (forward propagation):
-            if self.network_conn[pre_idx][post_idx] == 1:
-              temporal_diff = (self.t_minus_0_spike[pre_idx] + self.synaptic_delay 
-                                - self.t_minus_1_spike[post_idx])
-              dw = stdpScheme.stdp_dw(temporal_diff, scale_factor=self.eta, 
-                                      stdp_beta=self.stdp_beta, tau_r=self.stdp_tau_r,
-                                      tau_plus=self.stdp_tau_plus, tau_neg=self.stdp_tau_neg)
-              self.dW += dw
-              self.__update_w_matrix(dw, pre_idx, post_idx)
+        for j in range(self.n_neurons):
+          
+          # NOTE:
+          # There is a little bit of asymmetry here, that in the case A and B, 
+          # the temporal diff is always greater equal than 0 (the case for equal
+          # to zero is B and it is not supposed to happen because it assumes
+          # synaptic delay == 0).
+          #
+          # For C and D, the temporal difference straddles 0 and thus makes sense
+          # to use <0 and >=0 in the if-else to differentiate whether the presynaptic
+          # partner of the neuron in spotlit (i) is being transmitted.
+          # However, the if-else cannot tell the difference between whether 
+          # spike from the presynaptic partner is still in transit or it never spiked.
 
-            # # Inform post-synaptic partners about spike (backpropagation):
-            # elif self.network_conn[post_idx][pre_idx] == 1:  
-            #   temporal_diff =  (self.t_minus_0_spike[post_idx] + self.synaptic_delay 
-            #                     - self.t_minus_1_spike[pre_idx])
-            #   self.dW = self.dW + self.stdp_weight_update(temporal_diff, post_idx, pre_idx)
-            #   # self.stdp_weight_update(temporal_diff, post_idx, pre_idx)
+          ### Spotlight is on i ### SPIKED neuron connecting to others
+          # if i is pre-synaptic to j, update W(i,j)
+          if self.network_conn[i][j] == 1:
+
+            # Check if j has a spike in transit, and if so, use the spike before last:
+            # Smallest value is syn_delay; range: [syn_delay, t+syn_delay]
+            temporal_diff = self.t_minus_0_spike[i] - self.t_spike2[j]   + self.synaptic_delay
+            # <<<<<<<<<< IGNORE - DEBUG USE
+            # print(f"{' '*10} {self.t_spike2[i]} - {self.t_spike2[j]} + {self.synaptic_delay}")
+            # >>>>>>>>>> IGNORE - DEBUG USE
+            
+            # Case A
+            if temporal_diff > 0:  # ??? temporal_diff >= 0 ??? - Why not triage like Case C and D? 
+              # - i has spike in transit (both spiked at the same time or j spiked no more than delay-time ago)
+              # - LTD always, regardless of when j spiked
+              dW = dW + self.Delta_W_tau(temporal_diff,i,j)
+              # <<<<<<<<<< IGNORE - DEBUG USE
+              # print(f"A: STDP on {i} -> {j} at eulerstep {t} of time {self.t} ms")
+              # print(f"{' '*10} {self.t_spike2[i]} - {self.t_spike2[j]} + {self.synaptic_delay}")
+              # print(f"{' '*10} t_spike2[{i}]-t_spike2[{j}]: temporal_diff: {temporal_diff} ms")
+              # >>>>>>>>>> IGNORE - DEBUG USE
+            
+            # Case B
+            else:
+              # - This can only happen is synaptic delay = 0 
+              # - And this is always LTD
+              temporal_diff = self.t_minus_0_spike[i] - self.t_minus_1_spike[j] + self.synaptic_delay
+              dW = dW + self.Delta_W_tau(temporal_diff,i,j)
+              # <<<<<<<<<< IGNORE - DEBUG USE
+              # print(f"B: STDP on {i} -> {j} at eulerstep {t} of time {self.t} ms")
+              # print(f"{' '*10} {self.t_minus_0_spike[i]} - {self.t_minus_1_spike[j]} + {self.synaptic_delay}")
+              # print(f"{' '*10} t_minus_0_spike[{i}]-t_minus_1_spike[{j}]: temporal_diff: {temporal_diff} ms")
+              # >>>>>>>>>> IGNORE - DEBUG USE
+
+          ### Spotlight is on i ### SPIKED neuron receiving connection
+          # if j is pre-synaptic to i, update W(j,i)
+          if self.network_conn[j][i] == 1: 
+            
+            # check if j has a spike in transit, and if so, use the spike before last:
+            # Largest value is syn_delay; range: [syn_delay-t-10000, syn_delay]
+            temporal_diff =  self.t_minus_0_spike[j] - self.t_minus_0_spike[i] + self.synaptic_delay
+              # <<<<<<<<<< IGNORE - DEBUG USE
+            # print(f"{' '*10} {self.t_minus_0_spike[j]} - {self.t_minus_0_spike[i]} + {self.synaptic_delay}")
+              # >>>>>>>>>> IGNORE - DEBUG USE
+            
+            # Case C
+            if temporal_diff < 0: 
+              # - j's spike arrived at i before i spiked, thus LTP
+              dW = dW + self.Delta_W_tau(temporal_diff,j,i)
+              # <<<<<<<<<< IGNORE - DEBUG USE
+              # print(f"C: STDP on {j} -> {i} at eulerstep {t} of time {self.t} ms")
+              # print(f"{' '*10} t_minus_0_spike[{j}]-t_minus_0_spike[{i}]: temporal_diff: {temporal_diff} ms")
+              # print(f"{' '*10} {self.t_minus_0_spike[j]} - {self.t_minus_0_spike[i]} + {self.synaptic_delay}")
+              # >>>>>>>>>> IGNORE - DEBUG USE
+            
+            # Case D
+            else: 
+              # - j has spike in transit (both spiked at the same time or j spiked no more than delay-time ago)
+              # - Can be LTP or LTD, really depends when the last time j spiked.
+              #   - LTD if j's previous spike is less than delay-time ago from i's current spike.
+              #   - LTP if j's previous spike is more than delay-time ago from i's current spike.
+              temporal_diff = self.t_minus_1_spike[j] - self.t_minus_0_spike[i] + self.synaptic_delay
+              dW = dW + self.Delta_W_tau(temporal_diff,j,i)
+              # <<<<<<<<<< IGNORE - DEBUG USE
+              # print(f"D: STDP on {j} -> {i} at eulerstep {t} of time {self.t} ms")
+              # print(f"{' '*10} {self.t_minus_1_spike[j]} - {self.t_minus_0_spike[i]} + {self.synaptic_delay}")
+              # print(f"{' '*10} t_minus_1_spike[{j}]-t_minus_0_spike[{i}]: temporal_diff: {temporal_diff} ms")
+              # >>>>>>>>>> IGNORE - DEBUG USE
 
   def simulate(self, 
                sim_duration: float = 1, 
@@ -857,7 +919,7 @@ class LIF_Network:
       timer.time_perf(self.check_presynaptic_spike_arrival)()
 
       # Updates the network_W and dW
-      timer.time_perf(self.run_stdp_on_all_connected_pairs)()
+      timer.time_perf(self.__run_stdp_on_all_connected_pairs)()
       # timer.time_perf(stdpScheme.conn_update_STDP)(self.network_W, self.network_conn,
       #                             self.w_update_flag, self.synaptic_delay,
       #                             self.t_minus_1_spike, self.t_minus_0_spike)
