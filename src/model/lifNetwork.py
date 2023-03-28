@@ -414,6 +414,11 @@ class LIF_Network:
     making additional assumptions in that the noise conductivity is closer to 1
     as opposed to the 0.026 laid out in his paper.
 
+    NOTE (Tony): This method is calculating the dynamic noise conductivity for the
+     current euler-step, whereas the `_update_g_noise_tony` calculates the next
+     step's conductivity. The difference is minor in the grand scheme of things
+     when we allow some time for the neural network to stablize.
+
     Args:
         kappa_noise (float): [mS/cm^2] Noise conductivity.
     """
@@ -439,6 +444,11 @@ class LIF_Network:
     slower), and thus results in the neural network simulation taking much 
     longer time.
 
+    NOTE (Tony): This method is calculating the dynamic noise conductivity for the
+     next euler-step, whereas the `_update_g_noise` calculates the current
+     step's conductivity. The difference is minor in the grand scheme of things
+     when we allow some time for the neural network to stablize.
+
     Args:
         kappa_noise (float): [mS/cm^2] Noise conductivity.
     """
@@ -454,7 +464,6 @@ class LIF_Network:
                         * self.tau_syn * poisson_noise_spiked_input_count))
     self.g_noise = (self.g_noise + del_g_noise)
 
-      
   def __update_g_syn(self, kappa:float=400, 
                      external_stim_coup_strength:float=None, step:int=None, 
                      external_spiked_input_w_sums:npt.NDArray=None) -> None: 
@@ -509,9 +518,7 @@ class LIF_Network:
     self.g_syn = (self.g_syn * np.exp(-self.dt/self.tau_syn)
                   + kappa/self.n_neurons * self.spiked_input_w_sums
                   + external_stim_coup_strength * external_spiked_input_w_sums_step)
-    
-    
-      
+       
   def __update_g_syn_tony(self, kappa:float=8, 
                           external_stim_coup_strength:float=None, step:int=None, 
                           external_spiked_input_w_sums:npt.NDArray=None) -> None: 
@@ -569,8 +576,6 @@ class LIF_Network:
                    + per_neuron_coup_strength * self.tau_syn * self.spiked_input_w_sums 
                    + external_stim_coup_strength * external_spiked_input_w_sums_step))
     self.g_syn = (self.g_syn + del_g_syn)
-    
-    
     
   def __update_v(self, 
                step: int, 
