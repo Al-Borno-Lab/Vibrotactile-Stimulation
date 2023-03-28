@@ -103,7 +103,6 @@ class LIF_Network:
     if auto_random_connect:
       self.__random_conn()  # Create random neuron connections
 
-  
 ## COMMENT OUT TO BE ABLE TO COLLAPSE -- NEED SOME FIXING
   def __structured_conn(self, LIF, mean_w: float=0.5):
     # """To connect the neurons according to a seemingly exponential distribution.
@@ -217,7 +216,7 @@ class LIF_Network:
     # Hard bound to [1, 0]  
     np.clip(self.network_conn[(pre_idx, post_idx)], a_min=0, a_max=1)
 
-  def simulate_poisson(self, 
+  def __simulate_poisson(self, 
                        poisson_noise_lambda_hz: int = 20) -> None:
     """Calculate and update Poisson spike flags for noise input calculation.
     
@@ -242,12 +241,11 @@ class LIF_Network:
 
     if not ((n_per_second > 100) & (p_approx < 0.01)):
       raise Exception("""time-step is too large causing the Poisson noise binomial estimation to be inaccurate. 
-      See `simulate_poisson` method definition for more details.""")
+      See `__simulate_poisson` method definition for more details.""")
 
     # Generate Poisson noise spike flags
     self.poisson_noise_spike_flag = np.random.binomial(n=1, p=p_approx,
                                                        size=(self.n_neurons,))
-
 
   def spikeTrain(self, lookBack:float=None, first_n_neurons:int=5, purge:bool=False):
     """Plot spiketrain plot of specified neuron counts and lookBack range.
@@ -537,7 +535,7 @@ class LIF_Network:
         method (str, optional): _description_. Defaults to "Ali".
     """
     # Generate Poisson noise
-    self.simulate_poisson()
+    self.__simulate_poisson()
     poisson_noise_spiked_input_count = np.matmul(self.poisson_noise_spike_flag, self.network_conn)
 
     # Update conductivity (denoted g) - Integrate inputs from noise and synapses (Equation 6 from paper)
