@@ -247,6 +247,287 @@ class LIF_Network:
     self.poisson_noise_spike_flag = np.random.binomial(n=1, p=p_approx,
                                                        size=(self.n_neurons,))
 
+  def __check_if_spiked(self) -> None:
+    """Check if neurons spike, and mark them as needing to update connection weight.
+    """
+    spike = ((self.v >= self.v_thr)     # Met dynamic spiking threshold
+             * (self.spike_flag == 0))  # Not in abs_refractory period because not recently spiked
+    
+    self.spike_flag[spike] = 1                   # Mark them as SPIKED!
+    self.w_update_flag[spike] = 1                # Mark them as "Needing to update weight"
+    
+    ## Keep track of spike times
+    self.t_minus_1_spike[spike] = self.t_minus_0_spike[spike]  # Moves the t_minus_0_spike array into t_minus_1_spike for placeholding
+    self.t_minus_0_spike[spike] = self.t_current              # t_minus_0_spike keeps track of each neuron's most recent spike's timestamp
+
+  def __rectangular_spiking(self) -> None:
+    """Simulate a rectangular spike of v_spike mV for tau_spike ms.
+    """
+    # Depolarization phase
+    spiked = (self.spike_flag == 1)
+    self.v[spiked] = self.v_spike         # Rectangle spike shape by setting voltage to V_spike for duration of tau_spike (equation 3)
+    self.v_thr[spiked] = self.v_rf_spike  # Threshold is reset to V_th_spike=0mV right after spiking (equation 3)
+
+    # Hyperpolarization phase
+    in_abs_rf_period = (self.t_minus_1_spike + self.tau_spike) > self.t_current
+    self.v[(~in_abs_rf_period) * spiked] = self.v_reset  # Rectangular spike end resets potential to -67mV
+    
+    # Reset spike flag tracker
+    self.spike_flag[(~in_abs_rf_period) * spiked] = 0
+
+  def __calc_spiked_input_w_sums(self) -> None:
+    """Checking and updating if spike from presynaptic neurons have arrived.
+
+    This aligns with the Dirac Delta Distribution in equation 4 of the paper.
+    The intent to to check if the last spiking time plus synaptic delay (time
+    it takes a signal to propagate from the presynaptic neuron's soma to the
+    postsynaptic neuron's soma) has arrived found by finding the the difference
+    between the current time and previous step's time plus delay.
+
+    If so, we then sum up the pre-to-post weights of all the CONNECTED and 
+    SPIKES THAT HAVE ARRIVED [at postsynaptic soma] for each postsynaptic neuron
+    and this value is used to update the synaptic conductivity.
+    """
+    ## Dirac Delta Distribution (equation 4 in paper)
+    t_diff = self.t_minus_0_spike - (self.t_minus_1_spike + self.synaptic_delay)  # [n, ] array
+    s_flag = 1.0 * (abs(t_diff) < 0.01)  # 0.01 for floating point errors
+
+    # Presynaptic neurons' weight sum for each neuron
+    # start = time.time()  # DEBUG
+    element_wise = np.multiply(self.network_W, self.network_conn)
+    # print(f"{' '*15}element-wise calc time: {(time.time()-start)*1000} ms")  # DEBUG
+
+    # start = time.time()  # DEBUG
+    self.spiked_input_w_sums = np.matmul(s_flag, element_wise)
+    # print(f"{' '*15}matmul calc time: {(time.time() - start)*1000} ms")  # DEBUG
+
+  def __run_stdp_on_all_connected_pairs(self, )-> None:
+    """Checks all connected pairs and update weights based on STDP scheme.
+
+    This double-nested for-loop checks through all pairs, and the four cases 
+    (A, B, C, D) allows for checking of a spiked neuron's pre- and post-synaptic
+    partners. 
+
+    Case B is specifically for when synaptic delay = 0, which usually would not
+    happen in our current model as all neurons in this current model are 
+    homogenous.
+    """
+    if not self.w_update_flag.any():
+      return
+
+    for i in range(self.n_neurons):
+      if (self.w_update_flag[i] == 1):  ### SPOTLIGHT ###
+        self.spike_record = np.append(self.spike_record,np.array([i, self.t_current]))
+
+        for j in range(self.n_neurons):
+          
+          # NOTE:
+          # There is a little bit of asymmetry here, that in the case A and B, 
+          # the temporal diff is always greater equal than 0 (the case for equal
+          # to zero is B and it is not supposed to happen because it assumes
+          # synaptic delay == 0).
+          #
+          # For C and D, the temporal difference straddles 0 and thus makes sense
+          # to use <0 and >=0 in the if-else to differentiate whether the presynaptic
+          # partner of the neuron in spotlit (i) is being transmitted.
+          # However, the if-else cannot tell the difference between whether 
+          # spike from the presynaptic partner is still in transit or it never spiked.
+
+          ### Spotlight is on i ### SPIKED neuron connecting to others
+          # if i is pre-synaptic to j, update W(i,j)
+          if self.network_conn[i][j] == 1:
+
+            # Check if j has a spike in transit, and if so, use the spike before last:
+            # Smallest value is syn_delay; range: [syn_delay, t+syn_delay]
+            temporal_diff = self.t_minus_0_spike[i] - self.t_spike2[j]   + self.synaptic_delay
+            # <<<<<<<<<< IGNORE - DEBUG USE
+            # print(f"{' '*10} {self.t_spike2[i]} - {self.t_spike2[j]} + {self.synaptic_delay}")
+            # >>>>>>>>>> IGNORE - DEBUG USE
+            
+            # Case A
+            if temporal_diff > 0:  # ??? temporal_diff >= 0 ??? - Why not triage like Case C and D? 
+              # - i has spike in transit (both spiked at the same time or j spiked no more than delay-time ago)
+              # - LTD always, regardless of when j spiked
+              dW = dW + self.Delta_W_tau(temporal_diff,i,j)
+              # <<<<<<<<<< IGNORE - DEBUG USE
+              # print(f"A: STDP on {i} -> {j} at eulerstep {t} of time {self.t} ms")
+              # print(f"{' '*10} {self.t_spike2[i]} - {self.t_spike2[j]} + {self.synaptic_delay}")
+              # print(f"{' '*10} t_spike2[{i}]-t_spike2[{j}]: temporal_diff: {temporal_diff} ms")
+              # >>>>>>>>>> IGNORE - DEBUG USE
+            
+            # Case B
+            else:
+              # - This can only happen is synaptic delay = 0 
+              # - And this is always LTD
+              temporal_diff = self.t_minus_0_spike[i] - self.t_minus_1_spike[j] + self.synaptic_delay
+              dW = dW + self.Delta_W_tau(temporal_diff,i,j)
+              # <<<<<<<<<< IGNORE - DEBUG USE
+              # print(f"B: STDP on {i} -> {j} at eulerstep {t} of time {self.t} ms")
+              # print(f"{' '*10} {self.t_minus_0_spike[i]} - {self.t_minus_1_spike[j]} + {self.synaptic_delay}")
+              # print(f"{' '*10} t_minus_0_spike[{i}]-t_minus_1_spike[{j}]: temporal_diff: {temporal_diff} ms")
+              # >>>>>>>>>> IGNORE - DEBUG USE
+
+          ### Spotlight is on i ### SPIKED neuron receiving connection
+          # if j is pre-synaptic to i, update W(j,i)
+          if self.network_conn[j][i] == 1: 
+            
+            # check if j has a spike in transit, and if so, use the spike before last:
+            # Largest value is syn_delay; range: [syn_delay-t-10000, syn_delay]
+            temporal_diff =  self.t_minus_0_spike[j] - self.t_minus_0_spike[i] + self.synaptic_delay
+              # <<<<<<<<<< IGNORE - DEBUG USE
+            # print(f"{' '*10} {self.t_minus_0_spike[j]} - {self.t_minus_0_spike[i]} + {self.synaptic_delay}")
+              # >>>>>>>>>> IGNORE - DEBUG USE
+            
+            # Case C
+            if temporal_diff < 0: 
+              # - j's spike arrived at i before i spiked, thus LTP
+              dW = dW + self.Delta_W_tau(temporal_diff,j,i)
+              # <<<<<<<<<< IGNORE - DEBUG USE
+              # print(f"C: STDP on {j} -> {i} at eulerstep {t} of time {self.t} ms")
+              # print(f"{' '*10} t_minus_0_spike[{j}]-t_minus_0_spike[{i}]: temporal_diff: {temporal_diff} ms")
+              # print(f"{' '*10} {self.t_minus_0_spike[j]} - {self.t_minus_0_spike[i]} + {self.synaptic_delay}")
+              # >>>>>>>>>> IGNORE - DEBUG USE
+            
+            # Case D
+            else: 
+              # - j has spike in transit (both spiked at the same time or j spiked no more than delay-time ago)
+              # - Can be LTP or LTD, really depends when the last time j spiked.
+              #   - LTD if j's previous spike is less than delay-time ago from i's current spike.
+              #   - LTP if j's previous spike is more than delay-time ago from i's current spike.
+              temporal_diff = self.t_minus_1_spike[j] - self.t_minus_0_spike[i] + self.synaptic_delay
+              dW = dW + self.Delta_W_tau(temporal_diff,j,i)
+              # <<<<<<<<<< IGNORE - DEBUG USE
+              # print(f"D: STDP on {j} -> {i} at eulerstep {t} of time {self.t} ms")
+              # print(f"{' '*10} {self.t_minus_1_spike[j]} - {self.t_minus_0_spike[i]} + {self.synaptic_delay}")
+              # print(f"{' '*10} t_minus_1_spike[{j}]-t_minus_0_spike[{i}]: temporal_diff: {temporal_diff} ms")
+              # >>>>>>>>>> IGNORE - DEBUG USE
+
+  def __update_g_noise(self, 
+                     kappa_noise: float, 
+                     method:str = "Ali") -> None:
+    """Run the Dynamic noise conductivity update function.
+
+    Args:
+        kappa_noise (float): _description_
+        method (str, optional): _description_. Defaults to "Ali".
+    """
+    # Generate Poisson noise
+    self.__simulate_poisson()
+    poisson_noise_spiked_input_count = np.matmul(self.poisson_noise_spike_flag, self.network_conn)
+
+    # Update conductivity (denoted g) - Integrate inputs from noise and synapses (Equation 6 from paper)
+    if (method=="Tony"):
+      ########## TONY ##########
+      del_g_noise = (-self.g_noise 
+                     + kappa_noise * self.tau_syn * poisson_noise_spiked_input_count) * np.exp(-self.dt/self.tau_syn)
+      self.g_noise = (self.g_noise + del_g_noise)
+    elif (method=="Ali"):
+      ########## ALI ##########
+      self.g_noise = (self.g_noise * np.exp(-self.dt/self.tau_syn) 
+                      + self.g_poisson * self.poisson_noise_spike_flag)  # Poisson conductivity * poisson_input_flag makes sense because poisson_input_flag is binary outcome.
+      
+  def __update_g_syn(self, 
+                   step: int,
+                   kappa: float, 
+                   external_spiked_input_w_sums, 
+                   method:str = "Ali") -> None: 
+    """Run the Dynamic synaptic conductivity update function.
+
+    Args:
+        step (int): _description_
+        kappa (float): _description_
+        external_spiked_input_w_sums (_type_): _description_
+        method (str, optional): _description_. Defaults to "Ali".
+    """
+    
+    if (method=="Tony"):
+      # Set variables
+      per_neuron_coup_strength = kappa / self.n_neurons # [mS/cm^2] Neuron coupling strength (Network-coupling-strength / number-of-neurons)
+      external_stim_coup_strength = kappa / 5  # Coupling strength of input external inputs (i.e., vibrotactile stimuli); value 5 is arbitrary for a strong coupling strength.
+      del_g_syn = (-self.g_syn 
+                   + per_neuron_coup_strength * self.tau_syn * self.spiked_input_w_sums 
+                   + external_stim_coup_strength * external_spiked_input_w_sums[step, :]) * np.exp(-self.dt/self.tau_syn) 
+      self.g_syn = (self.g_syn + del_g_syn)
+    elif (method=="Ali"):
+      self.g_syn = (self.g_syn * np.exp(-self.dt/self.tau_syn)
+              + kappa/self.n_neurons * self.spiked_input_w_sums)
+      
+  def __update_v(self, 
+               step: int, 
+               euler_steps: int,
+               I_stim: npt.NDArray,
+               method:str="Ali",
+               capacitance_method:str="Ali") -> None: 
+    """Run the dynamic membrane potential update function.
+
+    Args:
+        step (int): _description_
+        euler_steps (int): _description_
+        I_stim (npt.NDArray): _description_
+        method (str, optional): _description_. Defaults to "Ali".
+        capacitance_method (str, optional): _description_. Defaults to "Ali".
+    """
+
+    # External stimulation current input matrix
+    if (type(I_stim) == np.ndarray):
+      if (I_stim.any() != None): 
+        ...
+    elif I_stim == None:
+      I_stim = np.zeros(shape=(euler_steps, self.n_neurons))
+
+    assert type(I_stim) == np.ndarray, "The I_stim matrix has to be a numpy ndarray."
+
+    # Variable value to use depending on Ali or the Paper's implementation
+    if (capacitance_method == "Ali"):
+      # NOTE: This is how Ali have his code. The tau_m variable doesn't really make sense.
+      #   Discussed with Jesse and can't quite figure it out.
+      capa_rv = self.tau_m        # What Ali used, much fewer network weight updates thus runs much faster  >>>> Jesse recommends Tony to look into STN firing frequency to validate which one to use for PD's STN.
+      # g_leak = 0.02  # MISTAKE!!! ALI DECLARED THIS AS 10!!! NEED TO RESIM!
+      g_leak = self.g_leak_ali  # 10
+    elif capacitance_method == "Paper":
+      # NOTE: This is how the variable is defined in the paper (equation 2)
+      capa_rv = self.capacitance  # What the paper stated, many more network updates and runs VERY SLOW!
+      # g_leak = 10  # MISTAKE!!! ONE OF FOUR OF THE SIMULATION RAN USED THIS VALUE AND TOOK FOREVER. I THINK THIS IS THE REASON!!!
+      g_leak = self.g_leak
+
+
+    # Different ways to update membrane potential
+    if method == "Tony":
+      I_noise = self.g_noise * (self.v_syn - self.v)
+      del_v = (g_leak * (self.v_rest - self.v)
+               + self.g_syn * (self.v_syn - self.v)
+               + I_stim[step, :] 
+               + I_noise) * (self.dt / capa_rv)
+      self.v = (self.v + del_v)
+    elif method == "Matteo":
+      # NOTE: This code is erroneous, may be the reason why Matteo's result is not reproducing Ali's.
+      self.v = self.v + (self.dt/capa_rv) * ((self.v_rest - self.v)
+                              - (self.g_noise + self.g_syn) * self.v)
+    elif method == "Ali":
+      # NOTE: Confusing, but this fits the paper equation, just without I_stim and I_noise
+      # NOTE: Ali eliminated v_rest=0mV and just mvoed the negative sign up the product.
+      self.v = self.v + (self.dt/capa_rv) * (g_leak * (self.v_rest - self.v)
+                              - (self.g_noise + self.g_syn) * self.v)
+    elif method == "Ali_Na_rev_potential":
+      # NOTE: This method was suggested by Jesse when on call discussing about the validity of the function.
+      na_rev_potential = 20  # 20 mV
+      self.v = (self.v + (self.dt/capa_rv) * (g_leak * (self.v_rest - self.v) 
+                                                + (self.g_noise + self.g_syn) * (na_rev_potential - self.v)))
+
+  def __update_thr(self, 
+                 method:str="Ali") -> None:
+    """Run the dynamic spike threshold computation.
+
+    Args:
+        method (str, optional): _description_. Defaults to "Ali".
+    """
+    # Determine method of dyanmic threshold update implementation
+    if method=="Tony":
+      del_v_thr = (self.v_thr_rest - self.v_thr) * np.exp(-self.dt/self.tau_rf_thr)
+      self.v_thr = (self.v_thr + del_v_thr)
+    elif method=="Ali":
+      self.v_thr = (self.v_thr + self.dt * (self.v_thr_rest - self.v_thr) / self.tau_rf_thr)
+
   def spikeTrain(self, lookBack:float=None, first_n_neurons:int=5, purge:bool=False):
     """Plot spiketrain plot of specified neuron counts and lookBack range.
 
@@ -525,291 +806,6 @@ class LIF_Network:
     return r
 
 
-  def update_g_noise(self, 
-                     kappa_noise: float, 
-                     method:str = "Ali") -> None:
-    """Run the Dynamic noise conductivity update function.
-
-    Args:
-        kappa_noise (float): _description_
-        method (str, optional): _description_. Defaults to "Ali".
-    """
-    # Generate Poisson noise
-    self.__simulate_poisson()
-    poisson_noise_spiked_input_count = np.matmul(self.poisson_noise_spike_flag, self.network_conn)
-
-    # Update conductivity (denoted g) - Integrate inputs from noise and synapses (Equation 6 from paper)
-    if (method=="Tony"):
-      ########## TONY ##########
-      del_g_noise = (-self.g_noise 
-                     + kappa_noise * self.tau_syn * poisson_noise_spiked_input_count) * np.exp(-self.dt/self.tau_syn)
-      self.g_noise = (self.g_noise + del_g_noise)
-    elif (method=="Ali"):
-      ########## ALI ##########
-      self.g_noise = (self.g_noise * np.exp(-self.dt/self.tau_syn) 
-                      + self.g_poisson * self.poisson_noise_spike_flag)  # Poisson conductivity * poisson_input_flag makes sense because poisson_input_flag is binary outcome.
-      
-
-  def update_g_syn(self, 
-                   step: int,
-                   kappa: float, 
-                   external_spiked_input_w_sums, 
-                   method:str = "Ali") -> None: 
-    """Run the Dynamic synaptic conductivity update function.
-
-    Args:
-        step (int): _description_
-        kappa (float): _description_
-        external_spiked_input_w_sums (_type_): _description_
-        method (str, optional): _description_. Defaults to "Ali".
-    """
-    
-    if (method=="Tony"):
-      # Set variables
-      per_neuron_coup_strength = kappa / self.n_neurons # [mS/cm^2] Neuron coupling strength (Network-coupling-strength / number-of-neurons)
-      external_stim_coup_strength = kappa / 5  # Coupling strength of input external inputs (i.e., vibrotactile stimuli); value 5 is arbitrary for a strong coupling strength.
-      del_g_syn = (-self.g_syn 
-                   + per_neuron_coup_strength * self.tau_syn * self.spiked_input_w_sums 
-                   + external_stim_coup_strength * external_spiked_input_w_sums[step, :]) * np.exp(-self.dt/self.tau_syn) 
-      self.g_syn = (self.g_syn + del_g_syn)
-    elif (method=="Ali"):
-      self.g_syn = (self.g_syn * np.exp(-self.dt/self.tau_syn)
-              + kappa/self.n_neurons * self.spiked_input_w_sums)
-      
-
-  def update_v(self, 
-               step: int, 
-               euler_steps: int,
-               I_stim: npt.NDArray,
-               method:str="Ali",
-               capacitance_method:str="Ali") -> None: 
-    """Run the dynamic membrane potential update function.
-
-    Args:
-        step (int): _description_
-        euler_steps (int): _description_
-        I_stim (npt.NDArray): _description_
-        method (str, optional): _description_. Defaults to "Ali".
-        capacitance_method (str, optional): _description_. Defaults to "Ali".
-    """
-
-    # External stimulation current input matrix
-    if (type(I_stim) == np.ndarray):
-      if (I_stim.any() != None): 
-        ...
-    elif I_stim == None:
-      I_stim = np.zeros(shape=(euler_steps, self.n_neurons))
-
-    assert type(I_stim) == np.ndarray, "The I_stim matrix has to be a numpy ndarray."
-
-    # Variable value to use depending on Ali or the Paper's implementation
-    if (capacitance_method == "Ali"):
-      # NOTE: This is how Ali have his code. The tau_m variable doesn't really make sense.
-      #   Discussed with Jesse and can't quite figure it out.
-      capa_rv = self.tau_m        # What Ali used, much fewer network weight updates thus runs much faster  >>>> Jesse recommends Tony to look into STN firing frequency to validate which one to use for PD's STN.
-      # g_leak = 0.02  # MISTAKE!!! ALI DECLARED THIS AS 10!!! NEED TO RESIM!
-      g_leak = self.g_leak_ali  # 10
-    elif capacitance_method == "Paper":
-      # NOTE: This is how the variable is defined in the paper (equation 2)
-      capa_rv = self.capacitance  # What the paper stated, many more network updates and runs VERY SLOW!
-      # g_leak = 10  # MISTAKE!!! ONE OF FOUR OF THE SIMULATION RAN USED THIS VALUE AND TOOK FOREVER. I THINK THIS IS THE REASON!!!
-      g_leak = self.g_leak
-
-
-    # Different ways to update membrane potential
-    if method == "Tony":
-      I_noise = self.g_noise * (self.v_syn - self.v)
-      del_v = (g_leak * (self.v_rest - self.v)
-               + self.g_syn * (self.v_syn - self.v)
-               + I_stim[step, :] 
-               + I_noise) * (self.dt / capa_rv)
-      self.v = (self.v + del_v)
-    elif method == "Matteo":
-      # NOTE: This code is erroneous, may be the reason why Matteo's result is not reproducing Ali's.
-      self.v = self.v + (self.dt/capa_rv) * ((self.v_rest - self.v)
-                              - (self.g_noise + self.g_syn) * self.v)
-    elif method == "Ali":
-      # NOTE: Confusing, but this fits the paper equation, just without I_stim and I_noise
-      # NOTE: Ali eliminated v_rest=0mV and just mvoed the negative sign up the product.
-      self.v = self.v + (self.dt/capa_rv) * (g_leak * (self.v_rest - self.v)
-                              - (self.g_noise + self.g_syn) * self.v)
-    elif method == "Ali_Na_rev_potential":
-      # NOTE: This method was suggested by Jesse when on call discussing about the validity of the function.
-      na_rev_potential = 20  # 20 mV
-      self.v = (self.v + (self.dt/capa_rv) * (g_leak * (self.v_rest - self.v) 
-                                                + (self.g_noise + self.g_syn) * (na_rev_potential - self.v)))
-
-
-  def update_thr(self, 
-                 method:str="Ali") -> None:
-    """Run the dynamic spike threshold computation.
-
-    Args:
-        method (str, optional): _description_. Defaults to "Ali".
-    """
-    # Determine method of dyanmic threshold update implementation
-    if method=="Tony":
-      del_v_thr = (self.v_thr_rest - self.v_thr) * np.exp(-self.dt/self.tau_rf_thr)
-      self.v_thr = (self.v_thr + del_v_thr)
-    elif method=="Ali":
-      self.v_thr = (self.v_thr + self.dt * (self.v_thr_rest - self.v_thr) / self.tau_rf_thr)
-
-
-  def __check_if_spiked(self) -> None:
-    """Check if neurons spike, and mark them as needing to update connection weight.
-    """
-    spike = ((self.v >= self.v_thr)     # Met dynamic spiking threshold
-             * (self.spike_flag == 0))  # Not in abs_refractory period because not recently spiked
-    
-    self.spike_flag[spike] = 1                   # Mark them as SPIKED!
-    self.w_update_flag[spike] = 1                # Mark them as "Needing to update weight"
-    
-    ## Keep track of spike times
-    self.t_minus_1_spike[spike] = self.t_minus_0_spike[spike]  # Moves the t_minus_0_spike array into t_minus_1_spike for placeholding
-    self.t_minus_0_spike[spike] = self.t_current              # t_minus_0_spike keeps track of each neuron's most recent spike's timestamp
-
-  def __rectangular_spiking(self) -> None:
-    """Simulate a rectangular spike of v_spike mV for tau_spike ms.
-    """
-    # Depolarization phase
-    spiked = (self.spike_flag == 1)
-    self.v[spiked] = self.v_spike         # Rectangle spike shape by setting voltage to V_spike for duration of tau_spike (equation 3)
-    self.v_thr[spiked] = self.v_rf_spike  # Threshold is reset to V_th_spike=0mV right after spiking (equation 3)
-
-    # Hyperpolarization phase
-    in_abs_rf_period = (self.t_minus_1_spike + self.tau_spike) > self.t_current
-    self.v[(~in_abs_rf_period) * spiked] = self.v_reset  # Rectangular spike end resets potential to -67mV
-    
-    # Reset spike flag tracker
-    self.spike_flag[(~in_abs_rf_period) * spiked] = 0
-
-  def __calc_spiked_input_w_sums(self) -> None:
-    """Checking and updating if spike from presynaptic neurons have arrived.
-
-    This aligns with the Dirac Delta Distribution in equation 4 of the paper.
-    The intent to to check if the last spiking time plus synaptic delay (time
-    it takes a signal to propagate from the presynaptic neuron's soma to the
-    postsynaptic neuron's soma) has arrived found by finding the the difference
-    between the current time and previous step's time plus delay.
-
-    If so, we then sum up the pre-to-post weights of all the CONNECTED and 
-    SPIKES THAT HAVE ARRIVED [at postsynaptic soma] for each postsynaptic neuron
-    and this value is used to update the synaptic conductivity.
-    """
-    ## Dirac Delta Distribution (equation 4 in paper)
-    t_diff = self.t_minus_0_spike - (self.t_minus_1_spike + self.synaptic_delay)  # [n, ] array
-    s_flag = 1.0 * (abs(t_diff) < 0.01)  # 0.01 for floating point errors
-
-    # Presynaptic neurons' weight sum for each neuron
-    # start = time.time()  # DEBUG
-    element_wise = np.multiply(self.network_W, self.network_conn)
-    # print(f"{' '*15}element-wise calc time: {(time.time()-start)*1000} ms")  # DEBUG
-
-    # start = time.time()  # DEBUG
-    self.spiked_input_w_sums = np.matmul(s_flag, element_wise)
-    # print(f"{' '*15}matmul calc time: {(time.time() - start)*1000} ms")  # DEBUG
-
-  def __run_stdp_on_all_connected_pairs(self, )-> None:
-    """Checks all connected pairs and update weights based on STDP scheme.
-
-    This double-nested for-loop checks through all pairs, and the four cases 
-    (A, B, C, D) allows for checking of a spiked neuron's pre- and post-synaptic
-    partners. 
-
-    Case B is specifically for when synaptic delay = 0, which usually would not
-    happen in our current model as all neurons in this current model are 
-    homogenous.
-    """
-    if not self.w_update_flag.any():
-      return
-
-    for i in range(self.n_neurons):
-      if (self.w_update_flag[i] == 1):  ### SPOTLIGHT ###
-        self.spike_record = np.append(self.spike_record,np.array([i, self.t_current]))
-
-        for j in range(self.n_neurons):
-          
-          # NOTE:
-          # There is a little bit of asymmetry here, that in the case A and B, 
-          # the temporal diff is always greater equal than 0 (the case for equal
-          # to zero is B and it is not supposed to happen because it assumes
-          # synaptic delay == 0).
-          #
-          # For C and D, the temporal difference straddles 0 and thus makes sense
-          # to use <0 and >=0 in the if-else to differentiate whether the presynaptic
-          # partner of the neuron in spotlit (i) is being transmitted.
-          # However, the if-else cannot tell the difference between whether 
-          # spike from the presynaptic partner is still in transit or it never spiked.
-
-          ### Spotlight is on i ### SPIKED neuron connecting to others
-          # if i is pre-synaptic to j, update W(i,j)
-          if self.network_conn[i][j] == 1:
-
-            # Check if j has a spike in transit, and if so, use the spike before last:
-            # Smallest value is syn_delay; range: [syn_delay, t+syn_delay]
-            temporal_diff = self.t_minus_0_spike[i] - self.t_spike2[j]   + self.synaptic_delay
-            # <<<<<<<<<< IGNORE - DEBUG USE
-            # print(f"{' '*10} {self.t_spike2[i]} - {self.t_spike2[j]} + {self.synaptic_delay}")
-            # >>>>>>>>>> IGNORE - DEBUG USE
-            
-            # Case A
-            if temporal_diff > 0:  # ??? temporal_diff >= 0 ??? - Why not triage like Case C and D? 
-              # - i has spike in transit (both spiked at the same time or j spiked no more than delay-time ago)
-              # - LTD always, regardless of when j spiked
-              dW = dW + self.Delta_W_tau(temporal_diff,i,j)
-              # <<<<<<<<<< IGNORE - DEBUG USE
-              # print(f"A: STDP on {i} -> {j} at eulerstep {t} of time {self.t} ms")
-              # print(f"{' '*10} {self.t_spike2[i]} - {self.t_spike2[j]} + {self.synaptic_delay}")
-              # print(f"{' '*10} t_spike2[{i}]-t_spike2[{j}]: temporal_diff: {temporal_diff} ms")
-              # >>>>>>>>>> IGNORE - DEBUG USE
-            
-            # Case B
-            else:
-              # - This can only happen is synaptic delay = 0 
-              # - And this is always LTD
-              temporal_diff = self.t_minus_0_spike[i] - self.t_minus_1_spike[j] + self.synaptic_delay
-              dW = dW + self.Delta_W_tau(temporal_diff,i,j)
-              # <<<<<<<<<< IGNORE - DEBUG USE
-              # print(f"B: STDP on {i} -> {j} at eulerstep {t} of time {self.t} ms")
-              # print(f"{' '*10} {self.t_minus_0_spike[i]} - {self.t_minus_1_spike[j]} + {self.synaptic_delay}")
-              # print(f"{' '*10} t_minus_0_spike[{i}]-t_minus_1_spike[{j}]: temporal_diff: {temporal_diff} ms")
-              # >>>>>>>>>> IGNORE - DEBUG USE
-
-          ### Spotlight is on i ### SPIKED neuron receiving connection
-          # if j is pre-synaptic to i, update W(j,i)
-          if self.network_conn[j][i] == 1: 
-            
-            # check if j has a spike in transit, and if so, use the spike before last:
-            # Largest value is syn_delay; range: [syn_delay-t-10000, syn_delay]
-            temporal_diff =  self.t_minus_0_spike[j] - self.t_minus_0_spike[i] + self.synaptic_delay
-              # <<<<<<<<<< IGNORE - DEBUG USE
-            # print(f"{' '*10} {self.t_minus_0_spike[j]} - {self.t_minus_0_spike[i]} + {self.synaptic_delay}")
-              # >>>>>>>>>> IGNORE - DEBUG USE
-            
-            # Case C
-            if temporal_diff < 0: 
-              # - j's spike arrived at i before i spiked, thus LTP
-              dW = dW + self.Delta_W_tau(temporal_diff,j,i)
-              # <<<<<<<<<< IGNORE - DEBUG USE
-              # print(f"C: STDP on {j} -> {i} at eulerstep {t} of time {self.t} ms")
-              # print(f"{' '*10} t_minus_0_spike[{j}]-t_minus_0_spike[{i}]: temporal_diff: {temporal_diff} ms")
-              # print(f"{' '*10} {self.t_minus_0_spike[j]} - {self.t_minus_0_spike[i]} + {self.synaptic_delay}")
-              # >>>>>>>>>> IGNORE - DEBUG USE
-            
-            # Case D
-            else: 
-              # - j has spike in transit (both spiked at the same time or j spiked no more than delay-time ago)
-              # - Can be LTP or LTD, really depends when the last time j spiked.
-              #   - LTD if j's previous spike is less than delay-time ago from i's current spike.
-              #   - LTP if j's previous spike is more than delay-time ago from i's current spike.
-              temporal_diff = self.t_minus_1_spike[j] - self.t_minus_0_spike[i] + self.synaptic_delay
-              dW = dW + self.Delta_W_tau(temporal_diff,j,i)
-              # <<<<<<<<<< IGNORE - DEBUG USE
-              # print(f"D: STDP on {j} -> {i} at eulerstep {t} of time {self.t} ms")
-              # print(f"{' '*10} {self.t_minus_1_spike[j]} - {self.t_minus_0_spike[i]} + {self.synaptic_delay}")
-              # print(f"{' '*10} t_minus_1_spike[{j}]-t_minus_0_spike[{i}]: temporal_diff: {temporal_diff} ms")
-              # >>>>>>>>>> IGNORE - DEBUG USE
-
   def simulate(self, 
                sim_duration: float = 1, 
                I_stim: npt.NDArray = None,
@@ -872,9 +868,9 @@ class LIF_Network:
     for step in range(euler_steps):  # Step-loop: because (time_duration/dt = steps OR sections)
       print(step)
       # Dynamic Function Update Poisson noise's conductivity
-      self.update_g_noise(kappa_noise=kappa_noise, method=temp_param["update_g_noise_method"])  
+      self.__update_g_noise(kappa_noise=kappa_noise, method=temp_param["update_g_noise_method"])  
       # Dynamic Function Update synaptic conductivity
-      self.update_g_syn(step=step, 
+      self.__update_g_syn(step=step, 
                         kappa=kappa, 
                         external_spiked_input_w_sums=external_spiked_input_w_sums, 
                         method=temp_param["update_g_syn_method"])
@@ -883,13 +879,13 @@ class LIF_Network:
       self.w_update_flag = np.zeros(self.n_neurons)           # Connection weight update tracker
       self.dW = 0                                                  # Net connection weight change per epoch
       # Dynamic Function Update membrane potential
-      timer.time_perf(self.update_v)(step=step, 
+      timer.time_perf(self.__update_v)(step=step, 
                     euler_steps=euler_steps,
                     I_stim = I_stim, 
                     method=temp_param["update_v_method"], 
                     capacitance_method=temp_param["update_v_capacitance_method"])
       # Dynamic Function Update spike threshold
-      timer.time_perf(self.update_thr)(method=temp_param["update_thr_method"])
+      timer.time_perf(self.__update_thr)(method=temp_param["update_thr_method"])
       
       # Check if the neurons spike and mark them as needing to update conn weight
       timer.time_perf(self.__check_if_spiked)()
