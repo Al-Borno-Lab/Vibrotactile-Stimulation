@@ -448,9 +448,10 @@ class LIF_Network:
                                                  self.network_conn)
     # Update conductivity (denoted g) - 
     # Integrate inputs from noise and synapses (Equation 6 from paper)
-    del_g_noise = ((-self.g_noise 
-                    + kappa_noise * self.tau_syn * poisson_noise_spiked_input_count) 
-                   * np.exp(-self.dt/self.tau_syn))
+    del_g_noise = (np.exp(-self.dt/self.tau_syn)
+                   * (- self.g_noise 
+                      + kappa_noise 
+                        * self.tau_syn * poisson_noise_spiked_input_count))
     self.g_noise = (self.g_noise + del_g_noise)
 
       
