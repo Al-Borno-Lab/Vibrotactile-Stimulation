@@ -657,11 +657,11 @@ class LIF_Network:
       self.v_thr = (self.v_thr + self.dt * (self.v_thr_rest - self.v_thr) / self.tau_rf_thr)
 
 
-  def check_if_spike(self) -> None:
+  def __check_if_spiked(self) -> None:
     """Check if neurons spike, and mark them as needing to update connection weight.
     """
-    spike = ((self.v >= self.v_thr) *   # Met dynamic spiking threshold
-              (self.spike_flag == 0))   # Not in abs_refractory period because not recently spiked
+    spike = ((self.v >= self.v_thr)     # Met dynamic spiking threshold
+             * (self.spike_flag == 0))  # Not in abs_refractory period because not recently spiked
     
     self.spike_flag[spike] = 1                   # Mark them as SPIKED!
     self.w_update_flag[spike] = 1                # Mark them as "Needing to update weight"
@@ -669,7 +669,6 @@ class LIF_Network:
     ## Keep track of spike times
     self.t_minus_1_spike[spike] = self.t_minus_0_spike[spike]  # Moves the t_minus_0_spike array into t_minus_1_spike for placeholding
     self.t_minus_0_spike[spike] = self.t_current              # t_minus_0_spike keeps track of each neuron's most recent spike's timestamp
-
 
   def __rectangular_spiking(self) -> None:
     """Simulate a rectangular spike of v_spike mV for tau_spike ms.
@@ -895,7 +894,7 @@ class LIF_Network:
       timer.time_perf(self.update_thr)(method=temp_param["update_thr_method"])
       
       # Check if the neurons spike and mark them as needing to update conn weight
-      timer.time_perf(self.check_if_spike)()
+      timer.time_perf(self.__check_if_spiked)()
 
       # Depolarization and Hyperpolarization (rectangular spike shape)
       timer.time_perf(self.__rectangular_spiking)()
