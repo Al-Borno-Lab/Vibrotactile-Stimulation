@@ -402,29 +402,57 @@ class LIF_Network:
               # print(f"{' '*10} t_minus_1_spike[{j}]-t_minus_0_spike[{i}]: temporal_diff: {temporal_diff} ms")
               # >>>>>>>>>> IGNORE - DEBUG USE
 
-  def __update_g_noise(self, 
-                     kappa_noise: float, 
-                     method:str = "Ali") -> None:
-    """Run the Dynamic noise conductivity update function.
+  def __update_g_noise(self, kappa_noise:float) -> None:
+    """Calculate and update noise conductivity using method by Ali's code.
+
+    This is the method used by Ali in his code, which diverges from what was 
+    laid out in his paper. In his paper, kappa_noise (conductivity) is set as 
+    0.026, hence would have made the noise conductivity update much slower 
+    thus requiring longer simulation duration to see the same effect.
+
+    Although this method updates the noise conducitivity much faster, it is
+    making additional assumptions in that the noise conductivity is closer to 1
+    as opposed to the 0.026 laid out in his paper.
 
     Args:
-        kappa_noise (float): _description_
-        method (str, optional): _description_. Defaults to "Ali".
+        kappa_noise (float): [mS/cm^2] Noise conductivity.
     """
     # Generate Poisson noise
     self.__simulate_poisson()
-    poisson_noise_spiked_input_count = np.matmul(self.poisson_noise_spike_flag, self.network_conn)
+    poisson_noise_spiked_input_count = np.matmul(self.poisson_noise_spike_flag, 
+                                                 self.network_conn)
+    # Update conductivity (denoted g) - 
+    # Integrate inputs from noise and synapses (Equation 6 from paper)
+    self.g_noise = (self.g_noise * np.exp(-self.dt/self.tau_syn) 
+                    + self.g_poisson * self.poisson_noise_spike_flag)  # Poisson conductivity * poisson_input_flag makes sense because poisson_input_flag is binary outcome.
+  
+  def __update_g_noise_tony(self, kappa_noise:float) -> None:
+    """Calcualte and update noise conductivity using method laid out in Ali's paper.
 
-    # Update conductivity (denoted g) - Integrate inputs from noise and synapses (Equation 6 from paper)
-    if (method=="Tony"):
-      ########## TONY ##########
-      del_g_noise = (-self.g_noise 
-                     + kappa_noise * self.tau_syn * poisson_noise_spiked_input_count) * np.exp(-self.dt/self.tau_syn)
-      self.g_noise = (self.g_noise + del_g_noise)
-    elif (method=="Ali"):
-      ########## ALI ##########
-      self.g_noise = (self.g_noise * np.exp(-self.dt/self.tau_syn) 
-                      + self.g_poisson * self.poisson_noise_spike_flag)  # Poisson conductivity * poisson_input_flag makes sense because poisson_input_flag is binary outcome.
+    This method is derived from equation 6 of Ali's paper with modification to 
+    incorporate exponential decay. As according to the paper's eqaution, the 
+    noise conductivity of 0.026 mS/cm^2 is incorporated into this update 
+    function.
+
+    The consequence of including the noise conducitivty value set forth in Ali's 
+    paper is that the noise conductivity updates very slowly (factor of 38x 
+    slower), and thus results in the neural network simulation taking much 
+    longer time.
+
+    Args:
+        kappa_noise (float): [mS/cm^2] Noise conductivity.
+    """
+    # Generate Poisson noise
+    self.__simulate_poisson()
+    poisson_noise_spiked_input_count = np.matmul(self.poisson_noise_spike_flag, 
+                                                 self.network_conn)
+    # Update conductivity (denoted g) - 
+    # Integrate inputs from noise and synapses (Equation 6 from paper)
+    del_g_noise = ((-self.g_noise 
+                    + kappa_noise * self.tau_syn * poisson_noise_spiked_input_count) 
+                   * np.exp(-self.dt/self.tau_syn))
+    self.g_noise = (self.g_noise + del_g_noise)
+
       
   def __update_g_syn(self, 
                    step: int,
@@ -527,6 +555,7 @@ class LIF_Network:
       self.v_thr = (self.v_thr + del_v_thr)
     elif method=="Ali":
       self.v_thr = (self.v_thr + self.dt * (self.v_thr_rest - self.v_thr) / self.tau_rf_thr)
+
 
   def spikeTrain(self, lookBack:float=None, first_n_neurons:int=5, purge:bool=False):
     """Plot spiketrain plot of specified neuron counts and lookBack range.
@@ -846,6 +875,20 @@ class LIF_Network:
       holder_dw (ndarray): 
         1D array of the net connection weight change of the entire network 
         at each epoch (Euler-step).
+
+    NOTE (Tony): 
+    - g_syn dynamic function using a different kappa value (50x larger):
+      - Ali's paper has a kappa_syn value of 8, but his code is using the 
+        value 400 and denotes this value as capa.
+      - The outcome is that his kappa/N value would be much larger (50x) larger than
+        that if we were to follow the value set forth in his paper. The dynamic membrane
+        conductivity will thus update much faster when the value is scaled to be 50x 
+        larger.
+    - g_noise dynamic function missing kappa_noise = 0.026:
+      - Ali's paper states kappa_noise = 0.026, however, his code is missing this
+        variable in the g_noise calculation function.
+      - The outcome is that g_noisie update much faster in Ali's code than when
+        using the value provided in Ali's paper.
     """
     
     euler_steps = int(sim_duration/self.dt)   # Number of Euler-method steps
