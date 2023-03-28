@@ -671,23 +671,9 @@ class LIF_Network:
     self.t_minus_0_spike[spike] = self.t_current              # t_minus_0_spike keeps track of each neuron's most recent spike's timestamp
 
 
-  def spiking(self) -> None:
-    """Simulate the spiking stage with a rectangular spike shape of v_spike for tau_spike ms.
-
-    The paper assumes and uses a rectangular spike shape, however, this only 
-    happens if we are voltage gating instead of spiking due to current input.
-
-    ??? When a postsynaptic neuron spike, is the input from the presynaptic neuron
-    more like a voltage clamp or more like a current? The former would make sense
-    for neurons live in a high resistance extracellular space, however, the latter
-    is more analogous to neurotransmitter transmitting signal from neuron to
-    neuron.
-
-    TODO (Tony):
-      - Check literature if STN neurons are more similar to voltage or current 
-        input (neurotransmitters).
+  def __rectangular_spiking(self) -> None:
+    """Simulate a rectangular spike of v_spike mV for tau_spike ms.
     """
-
     # Depolarization phase
     spiked = (self.spike_flag == 1)
     self.v[spiked] = self.v_spike         # Rectangle spike shape by setting voltage to V_spike for duration of tau_spike (equation 3)
@@ -700,7 +686,7 @@ class LIF_Network:
     # Reset spike flag tracker
     self.spike_flag[(~in_abs_rf_period) * spiked] = 0
 
-  def check_presynaptic_spike_arrival(self) -> None:
+  def __calc_spiked_input_w_sums(self) -> None:
     """Checking and updating if spike from presynaptic neurons have arrived.
 
     This aligns with the Dirac Delta Distribution in equation 4 of the paper.
@@ -718,14 +704,13 @@ class LIF_Network:
     s_flag = 1.0 * (abs(t_diff) < 0.01)  # 0.01 for floating point errors
 
     # Presynaptic neurons' weight sum for each neuron
-    start = time.time()
-    # element_wise = self.network_W * self.network_conn
+    # start = time.time()  # DEBUG
     element_wise = np.multiply(self.network_W, self.network_conn)
-    print(f"{' '*15}element-wise calc time: {(time.time()-start)*1000} ms")
+    # print(f"{' '*15}element-wise calc time: {(time.time()-start)*1000} ms")  # DEBUG
 
-    start = time.time()
+    # start = time.time()  # DEBUG
     self.spiked_input_w_sums = np.matmul(s_flag, element_wise)
-    print(f"{' '*15}matmul calc time: {(time.time() - start)*1000} ms")
+    # print(f"{' '*15}matmul calc time: {(time.time() - start)*1000} ms")  # DEBUG
 
   def __run_stdp_on_all_connected_pairs(self, )-> None:
     """Checks all connected pairs and update weights based on STDP scheme.
@@ -913,10 +898,10 @@ class LIF_Network:
       timer.time_perf(self.check_if_spike)()
 
       # Depolarization and Hyperpolarization (rectangular spike shape)
-      timer.time_perf(self.spiking)()
+      timer.time_perf(self.__rectangular_spiking)()
       
       # Update the variable needed for next step's g_syn calculation
-      timer.time_perf(self.check_presynaptic_spike_arrival)()
+      timer.time_perf(self.__calc_spiked_input_w_sums)()
 
       # Updates the network_W and dW
       timer.time_perf(self.__run_stdp_on_all_connected_pairs)()
