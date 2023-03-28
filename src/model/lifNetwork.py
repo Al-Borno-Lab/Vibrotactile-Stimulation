@@ -454,32 +454,123 @@ class LIF_Network:
     self.g_noise = (self.g_noise + del_g_noise)
 
       
-  def __update_g_syn(self, 
-                   step: int,
-                   kappa: float, 
-                   external_spiked_input_w_sums, 
-                   method:str = "Ali") -> None: 
-    """Run the Dynamic synaptic conductivity update function.
+  def __update_g_syn(self, kappa:float=400, 
+                     external_stim_coup_strength:float=None, step:int=None, 
+                     external_spiked_input_w_sums:npt.NDArray=None) -> None: 
+    """Calculate and update synaptic conductivity using methods from Ali's code.
+
+    This method is translated from Ali's code, of which kappa was set at 400.
+    kappa=400 is a 50x that of the value set forth in the paper (8), and the 
+    result of this larger kappa value is a stronger coupling and thus faster
+    synaptic conductivity update.
+
+    However, concern with using this method is that it deviates from what is 
+    set forth by Ali's paper and makes the assumption of neuron max total 
+    coupling strength to be 400 mS/cm^2 instead of 8 mS/cm^2 and hence may 
+    significantly deviate from actual physiological results when the neural
+    network is simulated on a larger scale than few thousand neurons.
+
+    NOTE (Tony): This method is calculating the dynamic conductivity for the
+     current euler-step, whereas the `_update_g_syn_tony` calculates the next
+     step's conductivity. The difference is minor in the grand scheme of things
+     when we allow some time for the neural network to stablize.
 
     Args:
-        step (int): _description_
-        kappa (float): _description_
-        external_spiked_input_w_sums (_type_): _description_
-        method (str, optional): _description_. Defaults to "Ali".
+        kappa (float, optional): 
+         [mS/cm^2] Max coupling strength. Defaults to 400.
+        external_stim_coup_strength (float, optional): 
+         Coupling strength of external stimulations. When the value is None,
+         the value is converted to kappa/5 to simulate a strong coupling.
+         Defaults to None.
+        step (int, optional): 
+         The current euler-step that calls this method; only needed
+         when `external_spiked_input_w_sums` is provided.
+         Defaults to None. 
+        external_spiked_input_w_sums (npt.NDArray, optional): 
+         The sum of spiked presynaptic connection weights of each neuron. 
+         When using the default value None, the value is converted to 0 for each
+         neuron equivalent to none of the presynaptic neurons for each neuron 
+         spiked. Defaults to None.
     """
+    # Set variables
+    if external_spiked_input_w_sums is None: 
+      external_spiked_input_w_sums_step = np.zeros(shape=(self.n_neurons, ))
+    else:
+      if step is None: 
+        raise AssertionError("`step` arg is needed if `external_spiked_input_w_sums` is provided.")
+      external_spiked_input_w_sums_step = external_spiked_input_w_sums[step, :]
+    if external_stim_coup_strength is None: 
+      # Coupling strength of input external inputs (i.e., vibrotactile stimuli); 
+      # value 5 is arbitrary for a strong coupling strength.
+      external_stim_coup_strength = kappa / 5
     
-    if (method=="Tony"):
-      # Set variables
-      per_neuron_coup_strength = kappa / self.n_neurons # [mS/cm^2] Neuron coupling strength (Network-coupling-strength / number-of-neurons)
-      external_stim_coup_strength = kappa / 5  # Coupling strength of input external inputs (i.e., vibrotactile stimuli); value 5 is arbitrary for a strong coupling strength.
-      del_g_syn = (-self.g_syn 
-                   + per_neuron_coup_strength * self.tau_syn * self.spiked_input_w_sums 
-                   + external_stim_coup_strength * external_spiked_input_w_sums[step, :]) * np.exp(-self.dt/self.tau_syn) 
-      self.g_syn = (self.g_syn + del_g_syn)
-    elif (method=="Ali"):
-      self.g_syn = (self.g_syn * np.exp(-self.dt/self.tau_syn)
-              + kappa/self.n_neurons * self.spiked_input_w_sums)
+    # Calculations
+    self.g_syn = (self.g_syn * np.exp(-self.dt/self.tau_syn)
+                  + kappa/self.n_neurons * self.spiked_input_w_sums
+                  + external_stim_coup_strength * external_spiked_input_w_sums_step)
+    
+    
       
+  def __update_g_syn_tony(self, kappa:float=8, 
+                          external_stim_coup_strength:float=None, step:int=None, 
+                          external_spiked_input_w_sums:npt.NDArray=None) -> None: 
+    """Calculate and update synaptic conductivity using methods from Ali's paper.
+
+    This method is adapted from equation 4 of Ali's paper and utilizes the 
+    max coupling strength (kappa) of 8 mS/cm^2.
+
+    When using this method compared to that of `__update_g_syn`, the synaptic
+    conductance updates much slowly because the other method uses a kappa value
+    of 400.
+
+    Additionally, this method has expanded its functionality to allow for
+    external stimulation inputs.
+
+    NOTE (Tony): This method is calculating the dynamic conductivity for the
+     next euler-step, whereas the `_update_g_syn` calculates the current
+     step's conductivity. The difference is minor in the grand scheme of things
+     when we allow some time for the neural network to stablize.
+
+    Args:
+        kappa (float, optional): 
+         [mS/cm^2] Max coupling strength. Defaults to 8.
+        external_stim_coup_strength (float, optional): 
+         Coupling strength of external stimulations. When the value is None,
+         the value is converted to kappa/5 to simulate a strong coupling.
+         Defaults to None.
+        step (int, optional): 
+         The current euler-step that calls this method; only needed
+         when `external_spiked_input_w_sums` is provided.
+         Defaults to None. 
+        external_spiked_input_w_sums (npt.NDArray, optional): 
+         The sum of spiked presynaptic connection weights of each neuron. 
+         When using the default value None, the value is converted to 0 for each
+         neuron equivalent to none of the presynaptic neurons for each neuron 
+         spiked. Defaults to None.
+    """
+    # Set variables
+    if external_spiked_input_w_sums is None: 
+      external_spiked_input_w_sums_step = np.zeros(shape=(self.n_neurons, ))
+    else:
+      if step is None: 
+        raise AssertionError("`step` arg is needed if `external_spiked_input_w_sums` is provided.")
+      external_spiked_input_w_sums_step = external_spiked_input_w_sums[step, :]
+    if external_stim_coup_strength is None: 
+      # Coupling strength of input external inputs (i.e., vibrotactile stimuli); 
+      # value 5 is arbitrary for a strong coupling strength.
+      external_stim_coup_strength = kappa / 5
+    # [mS/cm^2] Neuron coupling strength (Network-coupling-strength / number-of-neurons)
+    per_neuron_coup_strength = kappa / self.n_neurons
+    
+    # Update membrane conductivity
+    del_g_syn = (np.exp(-self.dt/self.tau_syn)
+                 *(-self.g_syn 
+                   + per_neuron_coup_strength * self.tau_syn * self.spiked_input_w_sums 
+                   + external_stim_coup_strength * external_spiked_input_w_sums_step))
+    self.g_syn = (self.g_syn + del_g_syn)
+    
+    
+    
   def __update_v(self, 
                step: int, 
                euler_steps: int,
