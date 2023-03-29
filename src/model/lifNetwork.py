@@ -253,7 +253,7 @@ class LIF_Network:
     self.poisson_noise_spike_flag = np.random.binomial(n=1, p=p_approx,
                                                        size=(self.n_neurons,))
 
-  def __check_if_spiked(self) -> None:
+  def __check_if_spikes(self) -> None:
     """Check if neurons spike, and mark them as needing to update connection weight.
     """
     ~~ Update spike record here
@@ -1053,7 +1053,7 @@ class LIF_Network:
       self.__update_thr()
       
       # Check if the neurons spike and mark them as needing to update conn weight
-      self.__check_if_spiked()
+      self.__check_if_spikes()
       # Depolarization and Hyperpolarization (rectangular spike shape)
       self.__rectangular_spiking()
       # Update the variable needed for next step's g_syn calculation
