@@ -578,66 +578,94 @@ class LIF_Network:
     self.g_syn = (self.g_syn + del_g_syn)
     
   def __update_v(self, 
-               step: int, 
-               euler_steps: int,
-               I_stim: npt.NDArray,
-               method:str="Ali",
-               capacitance_method:str="Ali") -> None: 
-    """Run the dynamic membrane potential update function.
+                 capacitance:npt.NDArray=None,
+                 g_leak:float=10) -> None:
+    """Calculates and updates the membrane potential with methods from Ali's code.
+
+    This method updates the membrane potential using the logic from Ali's code
+    and differs from the methods laid out in his methods in the following ways:
+      - Capacitance was drawn from a normal distribution centered at 150 instead 
+        of 3 as laid out in his paper.
+      - g_leak has a value of 10 mS/cm^2 instead of 0.02 as laid out in his paper.
+
+    The impact of scaling the values up from what was laid out in the paper is 
+    faster changes and thus shorter simulation time, however, the concern is 
+    that by scaling the values up, we are making the assumptions that capacitances
+    are around 150 microFarad/cm^2 and g_leak is around 10 (instead of 3 and 0.02).
 
     Args:
-        step (int): _description_
-        euler_steps (int): _description_
-        I_stim (npt.NDArray): _description_
-        method (str, optional): _description_. Defaults to "Ali".
-        capacitance_method (str, optional): _description_. Defaults to "Ali".
+        capacitance (npt.NDArray, optional): [microFarad/cm^2]
+          An array of n_neuron length indicating the capacitance of each neuron.
+          When at default `None`, the tau_m array is extracted from the object 
+          attribute. Defaults to None.
+        g_leak (float, optional): [mS/cm^2]
+          The leaky conductivity. Defaults to 10.
     """
+    # Set variables
+    if capacitance is None: 
+      capacitance = self.tau_m
 
-    # External stimulation current input matrix
-    if (type(I_stim) == np.ndarray):
-      if (I_stim.any() != None): 
-        ...
-    elif I_stim == None:
-      I_stim = np.zeros(shape=(euler_steps, self.n_neurons))
+    # Calculate membrane potential
+    # NOTE: Confusing, but this fits the paper equation, just without I_stim and I_noise
+    # NOTE: Ali eliminated v_rest=0mV and just mvoed the negative sign up the product.
+    self.v = self.v + (self.dt/capacitance) * (g_leak * (self.v_rest - self.v)
+                            - (self.g_noise + self.g_syn) * self.v)
+    
+  def __update_v_tony(self, 
+                      step:int=None, 
+                      external_current_stim: npt.NDArray=None,
+                      capacitance:npt.NDArray=None,
+                      g_leak:float=0.02,) -> None:
+    """Calculates and updates the membrane potentials
 
-    assert type(I_stim) == np.ndarray, "The I_stim matrix has to be a numpy ndarray."
+    This method calculates and updates the membrane potential and assumes that 
+    the capacitance for each neuron is a random variable drawn from a normal 
+    distribution (mu=3, stdev=0.15) as specified by Ali's paper.
 
-    # Variable value to use depending on Ali or the Paper's implementation
-    if (capacitance_method == "Ali"):
-      # NOTE: This is how Ali have his code. The tau_m variable doesn't really make sense.
-      #   Discussed with Jesse and can't quite figure it out.
-      capa_rv = self.tau_m        # What Ali used, much fewer network weight updates thus runs much faster  >>>> Jesse recommends Tony to look into STN firing frequency to validate which one to use for PD's STN.
-      # g_leak = 0.02  # MISTAKE!!! ALI DECLARED THIS AS 10!!! NEED TO RESIM!
-      g_leak = self.g_leak_ali  # 10
-    elif capacitance_method == "Paper":
-      # NOTE: This is how the variable is defined in the paper (equation 2)
-      capa_rv = self.capacitance  # What the paper stated, many more network updates and runs VERY SLOW!
-      # g_leak = 10  # MISTAKE!!! ONE OF FOUR OF THE SIMULATION RAN USED THIS VALUE AND TOOK FOREVER. I THINK THIS IS THE REASON!!!
-      g_leak = self.g_leak
+    Additionally, the leaky conductivity is default to 0.02 mS/cm^2.
 
+    Comparing with the values set in Ali's code (capacitance~150, g_leak=10),
+    the update steps when using this function is much smaller and thus takes 
+    much longer to simulate.
 
-    # Different ways to update membrane potential
-    if method == "Tony":
-      I_noise = self.g_noise * (self.v_syn - self.v)
-      del_v = (g_leak * (self.v_rest - self.v)
-               + self.g_syn * (self.v_syn - self.v)
-               + I_stim[step, :] 
-               + I_noise) * (self.dt / capa_rv)
-      self.v = (self.v + del_v)
-    elif method == "Matteo":
-      # NOTE: This code is erroneous, may be the reason why Matteo's result is not reproducing Ali's.
-      self.v = self.v + (self.dt/capa_rv) * ((self.v_rest - self.v)
-                              - (self.g_noise + self.g_syn) * self.v)
-    elif method == "Ali":
-      # NOTE: Confusing, but this fits the paper equation, just without I_stim and I_noise
-      # NOTE: Ali eliminated v_rest=0mV and just mvoed the negative sign up the product.
-      self.v = self.v + (self.dt/capa_rv) * (g_leak * (self.v_rest - self.v)
-                              - (self.g_noise + self.g_syn) * self.v)
-    elif method == "Ali_Na_rev_potential":
-      # NOTE: This method was suggested by Jesse when on call discussing about the validity of the function.
-      na_rev_potential = 20  # 20 mV
-      self.v = (self.v + (self.dt/capa_rv) * (g_leak * (self.v_rest - self.v) 
-                                                + (self.g_noise + self.g_syn) * (na_rev_potential - self.v)))
+    However, it is unclear why these values were chosen in Ali's code.
+
+    Args:
+        step (int, optional): 
+          The n-th euler-step the calculation is on. This value is only needed 
+          when the `external_current_stim` argument is provided. 
+          Defaults to None.
+        external_current_stim (npt.NDArray, optional): [microAmpere]
+          A euler-steps by n_neurons matrix indicating the external stimulation
+          current injected at specified time to specified neuron. 
+          When at default `None`, it assumes no external stimulation current.
+          Defaults to None.
+        capacitance (npt.NDArray, optional): [microFarad/cm^2]
+          An array of n_neuron length indicating the capacitance of each neuron.
+          When at default `None`, the value is taken from the object attribute, 
+          which draws from a normal distribution (mu=3, stdev=0.15) for each
+          neuron. Defaults to None.
+        g_leak (float, optional): [mS/cm^2]
+          The leaky conductivity. Defaults to 0.02.
+    """    
+    # Set variables
+    if external_current_stim == None:
+      external_current_stim_step = np.zeros(shape=(self.n_neurons, ))
+    else: 
+      if step is None: 
+        raise AssertionError("`step` arg is needed if `external_current_stim` is provided.")
+      external_current_stim_step = external_current_stim[step, :]
+    # Capacitance is drawn from a normal distribution
+    if capacitance is None: 
+      capacitance = self.capacitance
+      
+    # Update membrane potential
+    I_noise = self.g_noise * (self.v_syn - self.v)
+    del_v = (g_leak * (self.v_rest - self.v)
+              + self.g_syn * (self.v_syn - self.v)
+              + external_current_stim_step
+              + I_noise) * (self.dt / capacitance)
+    self.v = (self.v + del_v)
 
   def __update_thr(self, 
                  method:str="Ali") -> None:
