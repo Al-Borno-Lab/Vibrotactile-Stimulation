@@ -26,13 +26,6 @@ class LIF_Network:
 
     # Neuron count
     self.n_neurons = n_neurons
-
-    # Values that Ali uses in his codebase
-    self.v_spike = 20     # Not in paper, but shows up in Ali's codebase                    # [mV] The voltage that spikes rise to ((AP Peak))
-    self.g_leak_ali = 10  # The value Ali used in his code
-    self.v_ali = np.random.uniform(low=-10, high=10, size=(self.n_neurons,)) - 45           # [mV] Current membrane potential - Initialized with Unif(-55, -35)
-    self.tau_spike = 1                                                                      # [ms] Time for an AP spike, also the length of the absolute refractory period
-
     
     # Spatial organization
     self.x = np.random.uniform(*dimensions[0], size=self.n_neurons)
@@ -46,14 +39,12 @@ class LIF_Network:
     self.relax_time = 10000                                                                 # [ms] Length of relaxation phase 
 
     # Electrophysiology values
-    self.v = np.random.uniform(low=-38, high=-40, size=(self.n_neurons,))
     self.v_rest = -38                                                                       # [mV] Resting voltage, equilibrium voltage. Default: -38 mV
     self.v_thr = np.zeros(self.n_neurons) - 40                                              # [mV] Reversal potential for spiking; equation (3)
     self.v_thr_rest = np.zeros(self.n_neurons) - 40                                         # [mV] Reversal potential for spiking during refractory period. Defaults to -40mV; equation (3).
     self.v_syn = 0                                                                          # [mV] Reversal potential; equation (2) in paper
     self.tau_syn = 1                                                                        # [ms] Synaptic time-constant; equation (4) in paper
     self.tau_rf_thr = 5                                                                     # [ms] Timescale tau between refractory and normal thresholds relaxation period
-    self.g_leak = 0.02                                                                      # [mS/cm^2] Conductivity of the leak channels; equation (2) in paper
     self.g_syn_initial_value = 0                                                            # [mS/cm^2] Initial value of synaptic conductivity; equation (2) in paper
     # Connectivity parameters (connection weight = conductivity)
     self.synaptic_delay = 3                                                                 # [ms] Synaptic transmission delay from soma to soma (default: 3 ms), equation (4) in paper
@@ -80,7 +71,7 @@ class LIF_Network:
     self.g_noise = np.zeros(self.n_neurons)                                                 # Tracker of dynamic noise conductivity
     self.w_update_flag = np.zeros(self.n_neurons)                                           # Tracker of connetion weight updates. When a neuron spikes, it is flagged as needing update on its connection weight.
     self.spiked_input_w_sums = np.zeros(self.n_neurons)                                     # Tracker of the connected presynaptic weight sum for each neuron (Eq 4: weight * Dirac Delta Distribution)
-    self.dW = 0                                                                             # Tracker of change of weight used by `__run_stdp_on_all_connected_pairs()`
+    self.delta_w = 0                                                                             # Tracker of change of weight used by `__run_stdp_on_all_connected_pairs()`
     self.network_conn = np.zeros((self.n_neurons, self.n_neurons))                          # Tracker of Neuron connection matrix: from row-th neuron to column-th neuron
     self.network_W = 0                                                                      # Tracker of Neuron connection weight matrix: from row-th neuron to column-th neuron
 
@@ -90,6 +81,21 @@ class LIF_Network:
     self.stdp_tau_plus = 10                                                                 # For the postive half of STDP; equation (7)
     self.stdp_tau_neg = self.stdp_tau_r * self.stdp_tau_plus                                # For the negative half of STDP; equation (7)
     self.eta = 0.02                                                                         # Scales the weight update per spike; 0.02 for "slow STDP"; equation (7)
+
+    ### Below are Variables that Differs between Ali's Code vs Ali's Paper
+    # >>> Ali's Paper >>>
+    self.kappa = 8
+    self.kappa_noise = 0.026
+    self.g_leak = 0.02                                                                      # [mS/cm^2] Conductivity of the leak channels; equation (2) in paper
+    self.v = np.random.uniform(low=-38, high=-40, size=(self.n_neurons,))
+
+    # >>> Ali's Code >>>
+    self.kappa_ali_code = 400
+    self.kappa_noise_ali_code = 1  # Not specified, which equals to setting the variable as 1
+    self.v_spike = 20     # Not in paper, but shows up in Ali's codebase                    # [mV] The voltage that spikes rise to ((AP Peak))
+    self.g_leak_ali_code = 10  # The value Ali used in his code
+    self.v_ali = np.random.uniform(low=-10, high=10, size=(self.n_neurons,)) - 45           # [mV] Current membrane potential - Initialized with Unif(-55, -35)
+    self.tau_spike = 1                                                                      # [ms] Time for an AP spike, also the length of the absolute refractory period
 
     # ??? Speculate to be capacitance random variable drawn from a normal distribution ???
     # NOTE (Tony): Odd that this has an expected value of 150. Most reserach
@@ -250,11 +256,12 @@ class LIF_Network:
   def __check_if_spiked(self) -> None:
     """Check if neurons spike, and mark them as needing to update connection weight.
     """
+    ~~ Update spike record here
     spike = ((self.v >= self.v_thr)     # Met dynamic spiking threshold
              * (self.spike_flag == 0))  # Not in abs_refractory period because not recently spiked
     
     self.spike_flag[spike] = 1                   # Mark them as SPIKED!
-    self.w_update_flag[spike] = 1                # Mark them as "Needing to update weight"
+    self.w_update_flag[spike] = 1                # Mark them as "Needing to update weight" - Later reset under `__run_stdp_on_all_connected_pairs()`
     
     ## Keep track of spike times
     self.t_minus_1_spike[spike] = self.t_minus_0_spike[spike]  # Moves the t_minus_0_spike array into t_minus_1_spike for placeholding
@@ -314,7 +321,7 @@ class LIF_Network:
     """
     if not self.w_update_flag.any():
       return
-
+    ~~ Reset w_update_flag here
     for i in range(self.n_neurons):
       if (self.w_update_flag[i] == 1):  ### SPOTLIGHT ###
         self.spike_record = np.append(self.spike_record,np.array([i, self.t_current]))
@@ -402,7 +409,7 @@ class LIF_Network:
               # print(f"{' '*10} t_minus_1_spike[{j}]-t_minus_0_spike[{i}]: temporal_diff: {temporal_diff} ms")
               # >>>>>>>>>> IGNORE - DEBUG USE
 
-  def __update_g_noise(self, kappa_noise:float) -> None:
+  def __update_g_noise(self,) -> None:
     """Calculate and update noise conductivity using method by Ali's code.
 
     This is the method used by Ali in his code, which diverges from what was 
@@ -418,9 +425,6 @@ class LIF_Network:
      current euler-step, whereas the `_update_g_noise_tony` calculates the next
      step's conductivity. The difference is minor in the grand scheme of things
      when we allow some time for the neural network to stablize.
-
-    Args:
-        kappa_noise (float): [mS/cm^2] Noise conductivity.
     """
     # Generate Poisson noise
     self.__simulate_poisson()
@@ -431,7 +435,7 @@ class LIF_Network:
     self.g_noise = (self.g_noise * np.exp(-self.dt/self.tau_syn) 
                     + self.g_poisson * self.poisson_noise_spike_flag)  # Poisson conductivity * poisson_input_flag makes sense because poisson_input_flag is binary outcome.
   
-  def __update_g_noise_tony(self, kappa_noise:float) -> None:
+  def __update_g_noise_tony(self, kappa_noise:float=0.026) -> None:
     """Calcualte and update noise conductivity using method laid out in Ali's paper.
 
     This method is derived from equation 6 of Ali's paper with modification to 
@@ -450,7 +454,8 @@ class LIF_Network:
      when we allow some time for the neural network to stablize.
 
     Args:
-        kappa_noise (float): [mS/cm^2] Noise conductivity.
+        kappa_noise (float, optional): 
+          [mS/cm^2] Noise conductivity. Defaults to 0.026.
     """
     # Generate Poisson noise
     self.__simulate_poisson()
@@ -969,11 +974,8 @@ class LIF_Network:
 
   def simulate(self, 
                sim_duration: float = 1, 
-               I_stim: npt.NDArray = None,
-               external_spiked_input_w_sums: npt.NDArray = None,
-               kappa: float = 8,
-               kappa_noise: float = 0.026,
-               temp_param:dict=None):
+               external_current_stim: npt.NDArray = None,
+               external_spiked_input_w_sums: npt.NDArray = None,):
     """Run simulation
 
     Args: 
@@ -1026,11 +1028,6 @@ class LIF_Network:
     euler_steps = int(sim_duration/self.dt)   # Number of Euler-method steps
     euler_step_idx_start = self.t_current / self.dt  # Euler-step starting index
 
-
-    # Weight sums of external spiked and connected input (conductivity)
-    if external_spiked_input_w_sums == None: 
-      external_spiked_input_w_sums = np.zeros(shape=(euler_steps, self.n_neurons))
-
     # Output variable placeholders
     holder_epoch_timestamps = np.zeros((euler_steps, ))
     holder_v = np.zeros((euler_steps, self.n_neurons))
@@ -1042,42 +1039,28 @@ class LIF_Network:
     # Euler-step Loop
     for step in range(euler_steps):  # Step-loop: because (time_duration/dt = steps OR sections)
       print(step)
-      # Dynamic Function Update Poisson noise's conductivity
-      self.__update_g_noise(kappa_noise=kappa_noise, method=temp_param["update_g_noise_method"])  
-      # Dynamic Function Update synaptic conductivity
-      self.__update_g_syn(step=step, 
-                        kappa=kappa, 
-                        external_spiked_input_w_sums=external_spiked_input_w_sums, 
-                        method=temp_param["update_g_syn_method"])
-      # Reset variables
-      self.spiked_input_w_sums = np.zeros(self.n_neurons)     # Weight sum of all spiked-connected presynaptic neurons
-      self.w_update_flag = np.zeros(self.n_neurons)           # Connection weight update tracker
-      self.dW = 0                                                  # Net connection weight change per epoch
-      # Dynamic Function Update membrane potential
-      timer.time_perf(self.__update_v)(step=step, 
-                    euler_steps=euler_steps,
-                    I_stim = I_stim, 
-                    method=temp_param["update_v_method"], 
-                    capacitance_method=temp_param["update_v_capacitance_method"])
-      # Dynamic Function Update spike threshold
-      timer.time_perf(self.__update_thr)(method=temp_param["update_thr_method"])
+      
+      ## Dynamic Functions Update
+      # Update Poisson noise's conductivity - Ali's code method and variables
+      self.__update_g_noise()
+      # Update synaptic conductivity - Ali's code method and varaibles
+      self.__update_g_syn(kappa=self.kappa_ali_code, 
+                          external_spiked_input_w_sums=external_spiked_input_w_sums)
+      # Update membrane potential
+      self.__update_v(capacitance=self.tau_m, 
+                      g_leak=self.g_leak_ali_code)
+      # Update spike threshold
+      self.__update_thr()
       
       # Check if the neurons spike and mark them as needing to update conn weight
-      timer.time_perf(self.__check_if_spiked)()
-
+      self.__check_if_spiked()
       # Depolarization and Hyperpolarization (rectangular spike shape)
-      timer.time_perf(self.__rectangular_spiking)()
-      
+      self.__rectangular_spiking()
       # Update the variable needed for next step's g_syn calculation
-      timer.time_perf(self.__calc_spiked_input_w_sums)()
-
+      self.__calc_spiked_input_w_sums()
       # Updates the network_W and dW
-      timer.time_perf(self.__run_stdp_on_all_connected_pairs)()
-      # timer.time_perf(stdpScheme.conn_update_STDP)(self.network_W, self.network_conn,
-      #                             self.w_update_flag, self.synaptic_delay,
-      #                             self.t_minus_1_spike, self.t_minus_0_spike)
-
-     
+      self.__run_stdp_on_all_connected_pairs()
+    
 
       # End of Epoch:
       # NOTE: Used so that multiple simulation runs have continuity.
@@ -1087,7 +1070,12 @@ class LIF_Network:
       holder_g_syn[tix] = self.g_syn
       holder_poi_noise_flags[tix] = self.poisson_noise_spike_flag
       holder_spiked_input_w_sums[tix] = self.spiked_input_w_sums
-      holder_dw[tix] = self.dW
+      holder_dw[tix] = self.delta_w
+      
+      # Reset variables
+      # self.spiked_input_w_sums = np.zeros(self.n_neurons)     # Weight sum of all spiked-connected presynaptic neurons
+      # self.w_update_flag = np.zeros(self.n_neurons)           # Connection weight update tracker
+      # self.delta_w = 0                                                  # Net connection weight change per epoch
 
       # Increment Euler-step index
       self.euler_step_idx += 1
