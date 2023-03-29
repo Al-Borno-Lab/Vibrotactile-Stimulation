@@ -8,6 +8,6 @@ lif_ = mod.LIF_Network(n_neurons=700)
 
 print(lif_)
 
-lif_.simulate(sim_duration=100)
+lif_.simulate(sim_duration=200)
 
-lif_.spikeTrain()
+lif_.spikeTrain(first_n_neurons=100)
