@@ -8,13 +8,6 @@ lif_ = mod.LIF_Network(n_neurons=700)
 
 print(lif_)
 
-choose_model_setup = {"update_g_noise_method": "Ali",
-                      "update_g_syn_method": "Ali",
-                      "update_v_method": "Ali",
-                      "update_v_capacitance_method": "Ali",
-                      "update_thr_method": "Ali"
-                      }
+lif_.simulate(sim_duration=100)
 
-lif_.simulate(temp_param=choose_model_setup, sim_duration=100)
-
-# lif_.spikeTrain()
+lif_.spikeTrain()
