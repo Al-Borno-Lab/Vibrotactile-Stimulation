@@ -71,7 +71,6 @@ class LIF_Network:
     self.g_noise = np.zeros(self.n_neurons)                                                 # Tracker of dynamic noise conductivity
     self.w_update_flag = np.zeros(self.n_neurons)                                           # Tracker of connetion weight updates. When a neuron spikes, it is flagged as needing update on its connection weight.
     self.spiked_input_w_sums = np.zeros(self.n_neurons)                                     # Tracker of the connected presynaptic weight sum for each neuron (Eq 4: weight * Dirac Delta Distribution)
-    self.delta_w = 0                                                                             # Tracker of change of weight used by `__run_stdp_on_all_connected_pairs()`
     self.network_conn = np.zeros((self.n_neurons, self.n_neurons))                          # Tracker of Neuron connection matrix: from row-th neuron to column-th neuron
     self.network_W = 0                                                                      # Tracker of Neuron connection weight matrix: from row-th neuron to column-th neuron
 
@@ -306,8 +305,10 @@ class LIF_Network:
     # print(f"{' '*15}element-wise calc time: {(time.time()-start)*1000} ms")  # DEBUG
 
     # start = time.time()  # DEBUG
-    self.spiked_input_w_sums = np.matmul(s_flag, element_wise)
+    spiked_input_w_sums = np.matmul(s_flag, element_wise)
     # print(f"{' '*15}matmul calc time: {(time.time() - start)*1000} ms")  # DEBUG
+
+    self.spiked_input_w_sums = spiked_input_w_sums
 
   def __run_stdp_on_all_connected_pairs(self, )-> float:
     """Checks all connected pairs and update weights based on STDP scheme.
@@ -509,10 +510,17 @@ class LIF_Network:
     significantly deviate from actual physiological results when the neural
     network is simulated on a larger scale than few thousand neurons.
 
+    tau_syn is missing from the equation, and would be okay if tau_syn is always
+    1ms. If tau_syn were to ever change, the equation here would no longer be 
+    accurate.
+
     NOTE (Tony): This method is calculating the dynamic conductivity for the
      current euler-step, whereas the `_update_g_syn_tony` calculates the next
      step's conductivity. The difference is minor in the grand scheme of things
      when we allow some time for the neural network to stablize.
+
+    TODO (Tony): Check with Jesse whether the missing of tau_syn here in
+      __update_g_syn is a concern.
 
     Args:
         kappa (float, optional): 
@@ -543,9 +551,11 @@ class LIF_Network:
       # value 5 is arbitrary for a strong coupling strength.
       external_stim_coup_strength = kappa / 5
     
+    per_neuron_coup_strength = kappa/self.n_neurons
+
     # Calculations
     self.g_syn = (self.g_syn * np.exp(-self.dt/self.tau_syn)
-                  + kappa/self.n_neurons * self.spiked_input_w_sums
+                  + per_neuron_coup_strength * self.spiked_input_w_sums
                   + external_stim_coup_strength * external_spiked_input_w_sums_step)
        
   def __update_g_syn_tony(self, kappa:float=8, 
@@ -602,7 +612,7 @@ class LIF_Network:
     # Update membrane conductivity
     del_g_syn = (np.exp(-self.dt/self.tau_syn)
                  *(-self.g_syn 
-                   + per_neuron_coup_strength * self.tau_syn * self.spiked_input_w_sums 
+                   + per_neuron_coup_strength * self.tau_syn * self.spiked_input_w_sums
                    + external_stim_coup_strength * external_spiked_input_w_sums_step))
     self.g_syn = (self.g_syn + del_g_syn)
     
@@ -1083,7 +1093,7 @@ class LIF_Network:
       # Update the variable needed for next step's g_syn calculation
       self.__calc_spiked_input_w_sums()
       # Updates the network_W and dW
-      self.__run_stdp_on_all_connected_pairs()
+      delta_w_sum = self.__run_stdp_on_all_connected_pairs()
     
 
       # End of Epoch:
@@ -1094,16 +1104,12 @@ class LIF_Network:
       holder_g_syn[tix] = self.g_syn
       holder_poi_noise_flags[tix] = self.poisson_noise_spike_flag
       holder_spiked_input_w_sums[tix] = self.spiked_input_w_sums
-      holder_dw[tix] = self.delta_w
+      holder_dw[tix] = delta_w_sum
       
-      # Reset variables
-      # self.spiked_input_w_sums = np.zeros(self.n_neurons)     # Weight sum of all spiked-connected presynaptic neurons
-      # self.w_update_flag = np.zeros(self.n_neurons)           # Connection weight update tracker
-      # self.delta_w = 0                                                  # Net connection weight change per epoch
-
+  
       # Increment Euler-step index
       self.euler_step_idx += 1
-
+      
       ## Increment time tracker
       self.t_current += self.dt
     
