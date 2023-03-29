@@ -667,20 +667,27 @@ class LIF_Network:
               + I_noise) * (self.dt / capacitance)
     self.v = (self.v + del_v)
 
-  def __update_thr(self, 
-                 method:str="Ali") -> None:
-    """Run the dynamic spike threshold computation.
+  def __update_thr(self, ) -> None:
+    """Updates neuron spiking threshold with method from Ali's code.
 
-    Args:
-        method (str, optional): _description_. Defaults to "Ali".
+    This method does not exponentially decay and can cause issue if the user 
+    were to increase the timestep of the neural network.
+
+    For a exponentially decaying version, use `__update_thr_tony()` instead.
     """
     # Determine method of dyanmic threshold update implementation
-    if method=="Tony":
-      del_v_thr = (self.v_thr_rest - self.v_thr) * np.exp(-self.dt/self.tau_rf_thr)
-      self.v_thr = (self.v_thr + del_v_thr)
-    elif method=="Ali":
-      self.v_thr = (self.v_thr + self.dt * (self.v_thr_rest - self.v_thr) / self.tau_rf_thr)
+    self.v_thr = (self.v_thr + self.dt * (self.v_thr_rest - self.v_thr) / self.tau_rf_thr)
 
+  def __update_thr_tony(self, ) -> None:
+    """Updates the neuron spiking threshold with method from Ali's paper.
+
+    This method further enhanced the method laid out in Ali's paper by including
+    exponential decay to provide more accurate calculations if the timestep of 
+    the neural network were to increase.
+    """
+    # Determine method of dyanmic threshold update implementation
+    del_v_thr = np.exp(-self.dt/self.tau_rf_thr) * (self.v_thr_rest - self.v_thr)
+    self.v_thr = (self.v_thr + del_v_thr)
 
   def spikeTrain(self, lookBack:float=None, first_n_neurons:int=5, purge:bool=False):
     """Plot spiketrain plot of specified neuron counts and lookBack range.
