@@ -10,6 +10,7 @@ import time
 from src.utilities import timer
 import tensorflow as tf
 from src.model import stdpScheme
+from tqdm import tqdm
 
 class LIF_Network:
   """Leaky Intergrate-and-Fire (LIF) Neuron network model.
@@ -1071,8 +1072,8 @@ class LIF_Network:
     holder_dw = np.zeros((euler_steps, ))
 
     # Euler-step Loop
-    for step in range(euler_steps):  # Step-loop: because (time_duration/dt = steps OR sections)
-      print(step)
+    for step in tqdm(range(euler_steps), desc="Simulate Call - EulerScheme Calcaultions"):  # Step-loop: because (time_duration/dt = steps OR sections)
+      # print(step)
       
       ## Dynamic Functions Update
       # Update Poisson noise's conductivity - Ali's code method and variables
