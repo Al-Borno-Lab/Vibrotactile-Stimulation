@@ -30,13 +30,13 @@ def stdp_dw(time_diff:float, scale_factor:float=0.02,
   dw = 0
 
   if (tau_r is None) & (tau_plus is None) & (tau_neg is None):
-    raise Exception("tau_r, tau_plus, tau_neg: two of the three have to be provided.")
+    raise AssertionError("tau_r, tau_plus, tau_neg: two of the three have to be provided.")
   elif (tau_r is None) & (tau_plus is None):
-    raise Exception("Either tau_r or tau_plus is needed.")
+    raise AssertionError("Either tau_r or tau_plus is needed.")
   elif (tau_plus is None) & (tau_neg is None):
-    raise Exception("Either tau_plus or tau_neg is needed.")
+    raise AssertionError("Either tau_plus or tau_neg is needed.")
   elif (tau_neg is None) & (tau_r is None):
-    raise Exception("Either tau_neg or tau_r is needed.")
+    raise AssertionError("Either tau_neg or tau_r is needed.")
   
   if tau_neg is None:
     tau_neg = tau_r * tau_plus
