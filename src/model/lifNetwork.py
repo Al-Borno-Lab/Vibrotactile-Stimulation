@@ -26,8 +26,8 @@ class LIF_Network:
                auto_random_connect: bool = True) -> None:
 
     # Neuron count
-    self.n_neurons = n_neurons
-    
+    self.n_neurons = n_neurons    
+
     # Spatial organization
     self.x = np.random.uniform(*dimensions[0], size=self.n_neurons)
     self.y = np.random.uniform(*dimensions[1], size=self.n_neurons)
@@ -1059,6 +1059,15 @@ class LIF_Network:
       - The outcome is that g_noisie update much faster in Ali's code than when
         using the value provided in Ali's paper.
     """
+
+    # Default parameters
+    if temp_param is None: 
+      temp_param = choose_model_setup = {"update_g_noise_method": "Ali",
+                                         "update_g_syn_method": "Ali",
+                                         "update_v_method": "Ali",
+                                         "update_v_capacitance_method": "Ali",
+                                         "update_thr_method": "Ali"
+                                         }
     
     euler_steps = int(sim_duration/self.dt)   # Number of Euler-method steps
     euler_step_idx_start = self.t_current / self.dt  # Euler-step starting index
