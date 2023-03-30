@@ -1059,15 +1059,6 @@ class LIF_Network:
       - The outcome is that g_noisie update much faster in Ali's code than when
         using the value provided in Ali's paper.
     """
-
-    # Default parameters
-    if temp_param is None: 
-      temp_param = choose_model_setup = {"update_g_noise_method": "Ali",
-                                         "update_g_syn_method": "Ali",
-                                         "update_v_method": "Ali",
-                                         "update_v_capacitance_method": "Ali",
-                                         "update_thr_method": "Ali"
-                                         }
     
     euler_steps = int(sim_duration/self.dt)   # Number of Euler-method steps
     euler_step_idx_start = self.t_current / self.dt  # Euler-step starting index
