@@ -107,7 +107,7 @@ class LIF_Network:
     
     # Generate neuron connection matrix
     if auto_random_connect:
-      self.__random_conn()  # Create random neuron connections
+      self.random_conn()  # Create random neuron connections
 
 ## COMMENT OUT TO BE ABLE TO COLLAPSE -- NEED SOME FIXING
   def __structured_conn(self, LIF, mean_w: float=0.5):
@@ -174,7 +174,7 @@ class LIF_Network:
     # return dist
     ...
 
-  def __random_conn(self, mean_w: float=0.5, proba_conn: float=0.07) -> None:
+  def random_conn(self, mean_w: float=0.5, proba_conn: float=0.07) -> None:
     """Randomly create connections between neurons basing on the proba_conn.
 
     Using LIF neuron objects intrinsic probability of presynaptic connections
