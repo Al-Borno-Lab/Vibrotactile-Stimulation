@@ -191,20 +191,24 @@ class LIF_Network:
           Defaults 0.07.
     """
     # Ensure mean_w is in (0, 1) as any other value does not make sense.
-    assert (np.greater(mean_w, 0) & np.less(mean_w, 1)), \
-      f"mean_w has be within (0, 1) (exclusive). Current mean_w: {mean_w}"
+    # assert (np.greater(mean_w, 0) & np.less(mean_w, 1)), \
+    #   f"mean_w has be within (0, 1) (exclusive). Current mean_w: {mean_w}"
 
     # Generate connectivity matrix - Because none is connected at initialization
-    self.network_conn = np.random.binomial(n=1, p=proba_conn, 
-                                           size=(self.n_neurons, self.n_neurons))
+    self.network_conn = np.random.choice(a=[True, False], p=[proba_conn, (1-proba_conn)], 
+                                         size=(self.n_neurons, self.n_neurons))
     # Generate weight matrix
     self.network_W = np.random.random(size=(self.n_neurons, self.n_neurons))
+    
+    # Normalized to mean conductivity (i.e., `mean_w`)
+    connected_subset = self.network_W[self.network_conn]  # Filter out non-connected
+    current_nn_mean = np.mean(connected_subset)
+    normalization_scale = mean_w / current_nn_mean
+    self.network_W = np.multiply(normalization_scale, self.network_W)
+    
     # Mark non-connected pairs' weight as zero
     self.network_W = np.multiply(self.network_conn, self.network_W)
-    # Normalized to mean conductivity (i.e., `mean_w`)
-    self.network_W = np.multiply(self.network_W, 
-                                 mean_w / np.mean(self.network_W))
-    
+
     # Hard bound weight to [0, 1]
     # self.network_W = np.clip(self.network_W, 
     #                          a_min=0, a_max=1)
@@ -217,10 +221,19 @@ class LIF_Network:
     variable.
     """
     # Update connection weight
-    self.network_conn[(pre_idx, post_idx)] += dw
+    self.network_W[(pre_idx, post_idx)] += dw
     
     # Hard bound to [1, 0]  
-    np.clip(self.network_conn[(pre_idx, post_idx)], a_min=0, a_max=1)
+    np.clip(self.network_W[(pre_idx, post_idx)], a_min=0, a_max=1)
+
+  def calc_nn_mean_w(self) -> float:
+    """Calculate and return neural network connection weight at time of call."""
+
+    if self.network_conn.dtype is not np.dtype("bool"):
+      raise AssertionError("Connection matrix should be of dtype boolean.")
+    
+    mean_network_w = np.mean(self.network_W[self.network_conn])  # Ignore non-connected
+    return mean_network_w
 
   def __simulate_poisson(self, 
                        poisson_noise_lambda_hz: int = 20) -> None:
@@ -349,7 +362,7 @@ class LIF_Network:
 
           ### Spotlight is on i ### SPIKED neuron connecting to others
           # if i is pre-synaptic to j, update W(i,j)
-          if self.network_conn[i][j] == 1:
+          if self.network_conn[i][j] == True:
 
             # Check if j has a spike in transit, and if so, use the spike before last:
             # Smallest value is syn_delay; range: [syn_delay, t+syn_delay]
@@ -391,7 +404,7 @@ class LIF_Network:
 
           ### Spotlight is on i ### SPIKED neuron receiving connection
           # if j is pre-synaptic to i, update W(j,i)
-          if self.network_conn[j][i] == 1: 
+          if self.network_conn[j][i] == True: 
             
             # check if j has a spike in transit, and if so, use the spike before last:
             # Largest value is syn_delay; range: [syn_delay-t-10000, syn_delay]
@@ -1072,7 +1085,8 @@ class LIF_Network:
     holder_dw = np.zeros((euler_steps, ))
 
     # Euler-step Loop
-    for step in tqdm(range(euler_steps), desc="Simulate Call - EulerScheme Calcaultions"):  # Step-loop: because (time_duration/dt = steps OR sections)
+    for step in tqdm(range(euler_steps), disable=True,
+                     desc="Simulate Call - EulerScheme Calcaultions"):  # Step-loop: because (time_duration/dt = steps OR sections)
       # print(step)
       
       ## Dynamic Functions Update

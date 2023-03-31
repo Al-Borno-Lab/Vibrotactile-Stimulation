@@ -4,7 +4,8 @@ ignored_dir
 ########## Mac Ignore ##########
 .DS_Store
 
-
+######## VS Code Ignore #########
+*.code-workspace
 
 
 
