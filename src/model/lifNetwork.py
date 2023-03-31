@@ -222,6 +222,12 @@ class LIF_Network:
     # Hard bound to [1, 0]  
     np.clip(self.network_conn[(pre_idx, post_idx)], a_min=0, a_max=1)
 
+  def calc_nn_mean_w(self) -> float:
+    """Calculate and return neural network connection weight at time of call."""
+    
+    mean_network_w = np.mean(np.multiply(self.network_W, self.network_conn))
+    return mean_network_w
+
   def __simulate_poisson(self, 
                        poisson_noise_lambda_hz: int = 20) -> None:
     """Calculate and update Poisson spike flags for noise input calculation.
