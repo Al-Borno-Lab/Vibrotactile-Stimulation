@@ -1,5 +1,4 @@
 import numpy as np
-import tensorflow as tf
 from src.model import lifNetwork
 from numpy import typing as npt
 import matplotlib.pyplot as plt
