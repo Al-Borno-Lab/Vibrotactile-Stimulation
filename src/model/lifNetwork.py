@@ -8,7 +8,6 @@ from posixpath import join
 import numpy.typing as npt
 import time
 from src.utilities import timer
-import tensorflow as tf
 from src.model import stdpScheme
 from tqdm import tqdm
 
