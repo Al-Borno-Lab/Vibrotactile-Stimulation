@@ -488,7 +488,7 @@ def plotter2(LIF: lif.LIF_Network,
   """
 
   h = LIF.simulate(sim_duration = sim_duration, 
-                   epoch_current_input = I)
+                   external_current_stim = I)
   # [v,g,p,t,inp,dw] = h
   W2 = LIF.network_W
 
