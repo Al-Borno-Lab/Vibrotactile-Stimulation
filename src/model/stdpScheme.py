@@ -48,16 +48,16 @@ def stdp_dw(time_diff:float, scale_factor:float=0.02,
   if np.less_equal(time_diff, 0):
     dw = (scale_factor 
           * np.exp( time_diff / tau_plus))
-    if dw <= 0:
-      raise AssertionError(f"During LTP, dw should be > 0, it is {dw}")
+    if dw < 0:
+      raise AssertionError(f"During LTP, dw should be >= 0, it is {dw}")
   
   ## Case: LTD (Long-term depression)
   if np.greater(time_diff, 0):
     dw = (scale_factor 
           * -(stdp_beta / tau_r) 
           * np.exp( -time_diff / tau_neg ))
-    if dw >= 0:
-      raise AssertionError(f"During LTD, dw should be < 0, it is {dw}")
+    if dw > 0:
+      raise AssertionError(f"During LTD, dw should be <= 0, it is {dw}")
 
   return dw
 
