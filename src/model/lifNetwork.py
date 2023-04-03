@@ -671,8 +671,6 @@ class LIF_Network:
       capacitance = self.tau_m
 
     # Calculate membrane potential
-    # NOTE: Confusing, but this fits the paper equation, just without I_stim and I_noise
-    # NOTE: Ali eliminated v_rest=0mV and just mvoed the negative sign up the product.
     self.v = self.v + (self.dt/capacitance) * (g_leak * (self.v_rest - self.v)
                             - (self.g_noise + self.g_syn) * self.v)
     
@@ -726,11 +724,12 @@ class LIF_Network:
       
     # Update membrane potential
     I_noise = self.g_noise * (self.v_syn - self.v)
-    del_v = (g_leak * (self.v_rest - self.v)
-              + self.g_syn * (self.v_syn - self.v)
-              + external_current_stim_step
-              + I_noise) * (self.dt / capacitance)
-    self.v = (self.v + del_v)
+    del_v = (self.dt / capacitance) * (g_leak * (self.v_rest - self.v)
+                                       + self.g_syn * (self.v_syn - self.v)
+                                       + external_current_stim_step
+                                       + I_noise)
+    new_v = (self.v + del_v)
+    self.v = new_v
 
   def __update_thr(self, ) -> None:
     """Updates neuron spiking threshold with method from Ali's code.
@@ -741,7 +740,7 @@ class LIF_Network:
     For a exponentially decaying version, use `__update_thr_tony()` instead.
     """
     # Determine method of dyanmic threshold update implementation
-    self.v_thr = (self.v_thr + self.dt * (self.v_thr_rest - self.v_thr) / self.tau_rf_thr)
+    self.v_thr = (self.v_thr + self.dt/self.tau_rf_thr * (self.v_thr_rest - self.v_thr))
 
   def __update_thr_tony(self, ) -> None:
     """Updates the neuron spiking threshold with method from Ali's paper.
