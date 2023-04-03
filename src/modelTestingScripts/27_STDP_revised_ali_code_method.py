@@ -49,7 +49,7 @@ def plot_network_mean_weight_over_time(n_neurons:int=300,
                                        n_sim:int=10000,
                                        sim_duration:float=100,
                                        proba_conn:float=0.08,
-                                       mean_w:list=[0.1, 0.3, 0.5, 0.7, 0.9],
+                                       mean_w:list=[0.1, 0.2, 0.3, 0.5],
                                        export_iteration_skip:int=10,
                                        plot_dim:tuple=(25, 10)):
   """Plot the mean network weight over time."""
