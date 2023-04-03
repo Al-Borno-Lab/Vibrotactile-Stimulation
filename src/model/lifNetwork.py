@@ -750,7 +750,7 @@ class LIF_Network:
     the neural network were to increase.
     """
     # Determine method of dyanmic threshold update implementation
-    del_v_thr = np.exp(-self.dt/self.tau_rf_thr) * (self.v_thr_rest - self.v_thr)
+    del_v_thr = self.dt/self.tau_rf_thr * (self.v_thr_rest - self.v_thr)
     self.v_thr = (self.v_thr + del_v_thr)
 
   def spikeTrain(self, lookBack:float=None, first_n_neurons:int=5, purge:bool=False):
