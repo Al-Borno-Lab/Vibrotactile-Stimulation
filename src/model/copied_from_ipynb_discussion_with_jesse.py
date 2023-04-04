@@ -1,4 +1,13 @@
-#@title LIF Model
+import matplotlib.pyplot as plt    # MatPlotLib is a plotting package. 
+import numpy as np                 # NumPy is a numerical types package.
+from scipy import stats            # ScPy is a scientific computing package. We just want the stats, because Ca2+ imaging is always calculated in z-score.
+from scipy.stats import circmean
+import math
+from posixpath import join
+
+# Setup in-notebook plotting:
+# %matplotlib inline
+
 
 # Define LIF neurons:
 class LIF_Network:
@@ -126,7 +135,7 @@ class LIF_Network:
     self.poisson_input = 1 * (np.random.rand(self.n_neurons,) < self.poisson_freq)
   
   def assaySTDP(self):
-    %matplotlib inline
+    # %matplotlib inline
     fig = plt.figure()
 
     for i in range(-100,100,1):
@@ -142,11 +151,11 @@ class LIF_Network:
     dW = 0
     if time_diff < -0.01:
       dW = self.lamda * np.exp( time_diff / self.stdp_tau_plus )
-      print(f"{' '*10} LTP, dW = {dW}")
+    #   print(f"{' '*10} LTP, dW = {dW}")
     
     if time_diff > 0.01:
       dW = -(self.stdp_beta/self.stdp_tau_R) * self.lamda * np.exp( -time_diff / self.stdp_tau_neg)
-      print(f"{' '*10} LTD, dW = {dW}")
+    #   print(f"{' '*10} LTD, dW = {dW}")
 
     self.network_W[i][j] = self.network_W[i][j] + dW
     self.network_W[self.network_W > 1] = 1
@@ -164,7 +173,7 @@ class LIF_Network:
     SRix = np.argmax(SR[:,1] >= lookBack)
     SR = SR[SRix:,:]
     
-    %matplotlib inline
+    # %matplotlib inline
     fig = plt.figure()
     if tnorm:
       plt.plot([0, lb],[0,nNeurons],'white')
@@ -373,24 +382,24 @@ class LIF_Network:
                 # check if j has a spike in transit, and if so, use the spike before last:
                 # Smallest value is syn_delay; range: [syn_delay, t+syn_delay]
                 temporal_diff = self.t_spike2[i] - self.t_spike2[j]   + self.synaptic_delay
-                print(f"{' '*10} {self.t_spike2[i]} - {self.t_spike2[j]} + {self.synaptic_delay}")
+                # print(f"{' '*10} {self.t_spike2[i]} - {self.t_spike2[j]} + {self.synaptic_delay}")
                 
                 # Case A
                 if temporal_diff > 0:  # ??? temporal_diff >= 0 ??? - Why not triage like Case C and D? 
                   # - i has spike in transit (both spiked at the same time or j spiked no more than delay-time ago)
                   # - LTD always, regardless of when j spiked
-                  print(f"A: STDP on {i} -> {j} at eulerstep {t} of time {self.t} ms")
-                  print(f"{' '*10} {self.t_spike2[i]} - {self.t_spike2[j]} + {self.synaptic_delay}")
-                  print(f"{' '*10} t_spike2[{i}]-t_spike2[{j}]: temporal_diff: {temporal_diff} ms")
+                #   print(f"A: STDP on {i} -> {j} at eulerstep {t} of time {self.t} ms")
+                #   print(f"{' '*10} {self.t_spike2[i]} - {self.t_spike2[j]} + {self.synaptic_delay}")
+                #   print(f"{' '*10} t_spike2[{i}]-t_spike2[{j}]: temporal_diff: {temporal_diff} ms")
                   dW = dW + self.Delta_W_tau(temporal_diff,i,j)
                 # Case B
                 else:
                   # - This can only happen is synaptic delay = 0 
                   # - And this is always LTD
                   temporal_diff = self.t_spike2[i] - self.t_spike1[j] + self.synaptic_delay
-                  print(f"B: STDP on {i} -> {j} at eulerstep {t} of time {self.t} ms")
-                  print(f"{' '*10} {self.t_spike2[i]} - {self.t_spike1[j]} + {self.synaptic_delay}")
-                  print(f"{' '*10} t_spike2[{i}]-t_spike1[{j}]: temporal_diff: {temporal_diff} ms")
+                #   print(f"B: STDP on {i} -> {j} at eulerstep {t} of time {self.t} ms")
+                #   print(f"{' '*10} {self.t_spike2[i]} - {self.t_spike1[j]} + {self.synaptic_delay}")
+                #   print(f"{' '*10} t_spike2[{i}]-t_spike1[{j}]: temporal_diff: {temporal_diff} ms")
                   dW = dW + self.Delta_W_tau(temporal_diff,i,j)
 
               ### Spotlight is on i ### SPIKED neuron receiving connection
@@ -400,14 +409,14 @@ class LIF_Network:
                 # check if j has a spike in transit, and if so, use the spike before last:
                 # Largest value is syn_delay; range: [syn_delay-t-10000, syn_delay]
                 temporal_diff =  self.t_spike2[j] - self.t_spike2[i] + self.synaptic_delay
-                print(f"{' '*10} {self.t_spike2[j]} - {self.t_spike2[i]} + {self.synaptic_delay}")
+                # print(f"{' '*10} {self.t_spike2[j]} - {self.t_spike2[i]} + {self.synaptic_delay}")
                 
                 # Case C
                 if temporal_diff < 0: 
                   # - j's spike arrived at i before i spiked, thus LTP
-                  print(f"C: STDP on {j} -> {i} at eulerstep {t} of time {self.t} ms")
-                  print(f"{' '*10} t_spike2[{j}]-t_spike2[{i}]: temporal_diff: {temporal_diff} ms")
-                  print(f"{' '*10} {self.t_spike2[j]} - {self.t_spike2[i]} + {self.synaptic_delay}")
+                #   print(f"C: STDP on {j} -> {i} at eulerstep {t} of time {self.t} ms")
+                #   print(f"{' '*10} t_spike2[{j}]-t_spike2[{i}]: temporal_diff: {temporal_diff} ms")
+                #   print(f"{' '*10} {self.t_spike2[j]} - {self.t_spike2[i]} + {self.synaptic_delay}")
                   dW = dW + self.Delta_W_tau(temporal_diff,j,i)
                 # Case D
                 else: 
@@ -416,9 +425,9 @@ class LIF_Network:
                   #   - LTD if j's previous spike is less than delay-time ago from i's current spike.
                   #   - LTP if j's previous spike is more than delay-time ago from i's current spike.
                   temporal_diff = self.t_spike1[j] - self.t_spike2[i] + self.synaptic_delay
-                  print(f"D: STDP on {j} -> {i} at eulerstep {t} of time {self.t} ms")
-                  print(f"{' '*10} {self.t_spike1[j]} - {self.t_spike2[i]} + {self.synaptic_delay}")
-                  print(f"{' '*10} t_spike1[{j}]-t_spike2[{i}]: temporal_diff: {temporal_diff} ms")
+                #   print(f"D: STDP on {j} -> {i} at eulerstep {t} of time {self.t} ms")
+                #   print(f"{' '*10} {self.t_spike1[j]} - {self.t_spike2[i]} + {self.synaptic_delay}")
+                #   print(f"{' '*10} t_spike1[{j}]-t_spike2[{i}]: temporal_diff: {temporal_diff} ms")
                   dW = dW + self.Delta_W_tau(temporal_diff,j,i)
                              
       # End of Epoch:
@@ -433,6 +442,10 @@ class LIF_Network:
       self.t_itt += 1
       self.t += self.dt
       ii += 1
+
+      # print(f"self.network_W: {self.network_W}")
+      # print(f"self.network_conn: {self.network_conn}")
+      # print(np.mean(self.network_W[self.network_conn.astype(bool)]))
       
     return v_holder, gsyn_holder, pois_holder, t_holder, in_holder, dW_holder
  
