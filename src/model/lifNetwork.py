@@ -225,9 +225,8 @@ class LIF_Network:
     self.network_weight[(pre_idx, post_idx)] += dw
     
     # Hard bound to [0, 1]  
-    np.clip(self.network_weight[(pre_idx, post_idx)],
-            a_min=0, a_max=1, 
-            out=self.network_weight[(pre_idx, post_idx)])
+    self.network_weight[(pre_idx, post_idx)] = np.clip(a=self.network_weight[(pre_idx, post_idx)], 
+                                                       a_min=0, a_max=1)
 
     # # Debug check
     # if self.network_weight[(pre_idx, post_idx)] > 1:
