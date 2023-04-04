@@ -235,7 +235,7 @@ class LIF_Network:
 
     return dw
   
-  def plot_stdp_scheme_assay(self) -> plt.figure.Figure:
+  def plot_stdp_scheme_assay(self):
     """Plot the STDP scheme assay
 
     Y-axis being the connection weight update (delta w).
