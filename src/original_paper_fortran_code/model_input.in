@@ -1,5 +1,0 @@
-2.d-2     !lamda
-2500.d0      ! tmax in seconds
-10.d0      ! save data every 10 second
-400.d0    !capa max coupling
-1000       ! #neurons in a network 200, 500, or 1000,2000
