@@ -2,6 +2,26 @@
 import numpy as np
 import numpy.typing as npt
 import matplotlib.pyplot as plt
+from scipy import sparse
+
+## NOTES (Tony) - 2023-04-27:
+# - Sparsify
+# - Skip over the network_conn implementation in structured_conn
+# - Convert network_conn from bool to int
+# - Mask out the non-connected pairs' weight in `network_weight`
+# - `network_weight` normalizing to mean can be done with sparse as well
+# - Can you select elements in a sparse matrix via index?
+# - `calc_nn_mean_w` needs to be fixed as well
+# - Look into using mask for `network_weight` to save time on calculation
+# - How does masking work and does it safe calculation time? 
+# - `calc_spiked_input_w_sum` needs to be fixed as well, perhaps use masking for `network_weight`
+# - `__run_stdp_on_all_connected_pairs` needs to be fixed, the if-statement checks (2x fixes).
+# - `poisson_noise_spike_flag` can be turned to sparse as well (check, may not be worth it if 1D)
+# - `generate_poisson_spike()` has a matmul between spike_flag and network_conn
+# - `simulate()` also has a matmul with network_conn that can turn to sparse
+# - `simulate()` has the two if-statement as that of the `run_stdp...`
+# - May need a get method for extracting network_conn as dense matrix
+# - Other variables may also need get method for extracting if they are going to be sparse.
 
 # Calculation dependencies
 from scipy import stats    # We just want the stats, because Ca2+ imaging is always calculated in z-score.
