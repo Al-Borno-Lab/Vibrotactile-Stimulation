@@ -5,14 +5,24 @@ import matplotlib.pyplot as plt
 from scipy import sparse
 
 ## NOTES (Tony) - 2023-04-27:
-# - Sparsify
-# - Skip over the network_conn implementation in structured_conn
-# - Convert network_conn from bool to int
-# - Mask out the non-connected pairs' weight in `network_weight`
+# - [] Convert `network_conn`` from bool to int
+# - [] Look into using mask for `network_weight` to save time on calculation
+# - [] Network weight initialization also filters out non-connected
+#   - Assuming independent connection probability, we can copy the conn sparse array
+#     and create connection weight via the sparse array data.
+# - [x] Sparsify - outline where to sparsify the code
+# - [x] Skip over the network_conn implementation in structured_conn
+# - [x] Mask out the non-connected pairs' weight in `network_weight` --> Not a good idea
+# - [x] Can you select elements in a sparse matrix via index?
+#   because numpy maskedarray is not compiled and has a lot of computation overhead. It works
+#   best in cases when the sparsity is low, thus take note to implement this using 
+#   sparse array instead.
+# - Consider how to parallelize `run_stdp_on_all_pairs` with CuPy or Numba - May not matter much if sparsity is high.
+# - `network_weight` non-connected pairs marked as zero in sparse matrix (this 
+#   makes sense because if neurons are not connected, they shouldn't spontaneously 
+#   start connecting with each other.)
 # - `network_weight` normalizing to mean can be done with sparse as well
-# - Can you select elements in a sparse matrix via index?
 # - `calc_nn_mean_w` needs to be fixed as well
-# - Look into using mask for `network_weight` to save time on calculation
 # - How does masking work and does it safe calculation time? 
 # - `calc_spiked_input_w_sum` needs to be fixed as well, perhaps use masking for `network_weight`
 # - `__run_stdp_on_all_connected_pairs` needs to be fixed, the if-statement checks (2x fixes).
@@ -206,6 +216,7 @@ class LIF_Network:
     #   f"mean_w has be within (0, 1) (exclusive). Current mean_w: {mean_w}"
 
     # Initialize network connectivity matrix
+    # TODO (Tony): Change this to int instead of bool
     self.network_conn = np.random.choice(a=[True, False], 
                                          p=[proba_conn, (1-proba_conn)], 
                                          size=(self.n_neurons, self.n_neurons))
@@ -213,12 +224,14 @@ class LIF_Network:
     self.network_weight = np.random.random(size=(self.n_neurons, self.n_neurons))
     
     # Normalized to mean conductivity (i.e., `mean_w`)
+    # TODO (Tony): Fix masking behavior when network_conn is changed to int instead of bool because it will be index selecting.
     connected_subset = self.network_weight[self.network_conn]  # Filter out non-connected
     current_nn_mean = np.mean(connected_subset)
     normalization_scale = mean_w / current_nn_mean
     self.network_weight = np.multiply(normalization_scale, self.network_weight)
     
     # Mark non-connected pairs' weight as zero
+    # TODO (Tony): Does sparse array multiplication return a sparse array as well?
     self.network_weight = np.multiply(self.network_conn, self.network_weight)
 
     # COMMENTED OUT: >>> Hard bounding is enforced during weight update
@@ -277,9 +290,11 @@ class LIF_Network:
   def calc_nn_mean_w(self) -> float:
     """Calculate and return neural network mean connection weight at time of call."""
 
+    # TODO (Tony): Remove assertion because conn matrix will no longer be of bool.
     if self.network_conn.dtype is not np.dtype("bool"):
       raise AssertionError("Connection matrix should be of dtype boolean.")
     
+    # TODO (Tony): Check if the sparse mean is of dense or sparse array?
     mean_network_w = np.mean(self.network_weight[self.network_conn])  # Ignore non-connected
     return mean_network_w
 
@@ -364,11 +379,13 @@ class LIF_Network:
     # s_flag = 1.0 * (abs(t_diff) < 0.01)  # (Tony) Testing the following implementation
     s_flag = np.isclose(t_diff, 0, atol=1e-2).astype(int)  # 0.01 for floating point errors
 
+    # TODO (Tony): Eliminate this element-wise step by fixing the weight matrix during initialization.
     # Presynaptic neurons' weight sum for each neuron
     # start = time.time()  # DEBUG
     element_wise = np.multiply(self.network_weight, self.network_conn)
     # print(f"{' '*15}element-wise calc time: {(time.time()-start)*1000} ms")  # DEBUG
 
+    # TODO (Tony): Eliminate transpose because 1D is either pre-/post-pended with 1 dimension
     # start = time.time()  # DEBUG
     spiked_input_w_sums = np.matmul(s_flag.T, element_wise)
     # print(f"{' '*15}matmul calc time: {(time.time() - start)*1000} ms")  # DEBUG
@@ -1231,6 +1248,7 @@ class LIF_Network:
 
       s_difference = self.t_current-(self.t_currentSpike+self.synaptic_delay)
       s_flag = 1.0 * (abs(s_difference) < .01)
+      # TODO (Tony): Move element-wise multiplication to weight initialization step so to calculate just once.
       self.network_input = np.matmul(s_flag.T, self.network_weight * self.network_conn)
 
       # STDP:
