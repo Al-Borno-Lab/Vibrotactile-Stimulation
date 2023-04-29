@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 from scipy import sparse
 
 ## NOTES (Tony) - 2023-04-27:
-# - [] Convert `network_conn`` from bool to int
-# - [] Look into using mask for `network_weight` to save time on calculation
-# - [] Network weight initialization also filters out non-connected
+# - [x] Convert `network_conn`` from bool to int
+# - [x] Look into using mask for `network_weight` to save time on calculation
+# - [x] Network weight initialization also filters out non-connected
 #   - Assuming independent connection probability, we can copy the conn sparse array
 #     and create connection weight via the sparse array data.
 # - [x] Sparsify - outline where to sparsify the code
@@ -1163,9 +1163,9 @@ class LIF_Network:
             holder_dw)
   
   def simulate(self, 
-              sim_duration: float = 1, 
-              external_current_stim: npt.NDArray = None,  # Used for __update_v_tony (feature expansion)
-              external_spiked_input_w_sums: npt.NDArray = None,):
+               sim_duration: float = 1, 
+               external_current_stim: npt.NDArray = None,  # Used for __update_v_tony (feature expansion)
+               external_spiked_input_w_sums: npt.NDArray = None,):
     
     euler_steps = int(sim_duration / self.dt)
 
