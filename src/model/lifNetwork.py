@@ -1184,7 +1184,7 @@ class LIF_Network:
 
     # Time loop:
     ii = 0
-    for t in range(euler_steps):
+    for t in tqdm(range(euler_steps), desc="Simulating"):
 
       # Calculate Poisson noise
       self.__generate_poisson_noise()
