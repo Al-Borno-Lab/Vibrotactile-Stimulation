@@ -99,8 +99,8 @@ class LIF_Network:
     self.g_noise             = np.zeros((self.n_neurons, ), dtype=float)                               # Tracker of dynamic noise conductivity
     self.flag_wUpdate        = np.zeros((self.n_neurons, ), dtype=int)                                 # Tracker of connetion weight updates. When a neuron spikes, it is flagged as needing update on its connection weight.
     self.spiked_input_w_sums = np.zeros((self.n_neurons, ), dtype=float)                               # Tracker of the connected presynaptic weight sum for each neuron (Eq 4: weight * Dirac Delta Distribution)
-    self.network_conn        = np.zeros((self.n_neurons, self.n_neurons))                              # Tracker of Neuron connection matrix: from row-th neuron to column-th neuron
-    self.network_weight      = np.random.random(size=(self.n_neurons, self.n_neurons))                 # Tracker of Neuron connection weight matrix: from row-th neuron to column-th neuron
+    self.network_conn        = None                                                                    # Tracker of Neuron connection matrix: from row-th neuron to column-th neuron
+    self.network_weight      = None                                                                    # Tracker of Neuron connection weight matrix: from row-th neuron to column-th neuron
 
     # STDP paramters
     self.stdp_beta = 1.4                                       # Balance factor (ratio of LTD to LTP); equation (7)
@@ -216,7 +216,6 @@ class LIF_Network:
     #   f"mean_w has be within (0, 1) (exclusive). Current mean_w: {mean_w}"
 
     # Initialize network connectivity matrix
-    # TODO (Tony): Change this to int instead of bool
     self.network_conn = np.random.choice(a=[1, 0], 
                                          p=[proba_conn, (1-proba_conn)], 
                                          size=(self.n_neurons, self.n_neurons))
@@ -227,7 +226,6 @@ class LIF_Network:
     self.network_weight.data = np.random.random(size=self.network_weight.nnz)
     
     # Normalized to mean conductivity (i.e., `mean_w`)
-    # TODO (Tony): Fix masking behavior when network_conn is changed to int instead of bool because it will be index selecting.
     current_nn_mean = self.network_weight.mean(axis=None, dtype=float)
     normalization_scale = mean_w / current_nn_mean
     self.network_weight *= normalization_scale
@@ -287,13 +285,8 @@ class LIF_Network:
 
   def calc_nn_mean_w(self) -> float:
     """Calculate and return neural network mean connection weight at time of call."""
-
-    # TODO (Tony): Remove assertion because conn matrix will no longer be of bool.
-    if self.network_conn.dtype is not np.dtype("bool"):
-      raise AssertionError("Connection matrix should be of dtype boolean.")
     
-    # TODO (Tony): Check if the sparse mean is of dense or sparse array?
-    mean_network_w = np.mean(self.network_weight[self.network_conn])  # Ignore non-connected
+    mean_network_w = self.network_weight.mean(axis=None, dtype=float)
     return mean_network_w
 
   def __generate_poisson_noise(self, poisson_noise_lambda_hz:int=20) -> None:
@@ -377,18 +370,7 @@ class LIF_Network:
     # s_flag = 1.0 * (abs(t_diff) < 0.01)  # (Tony) Testing the following implementation
     s_flag = np.isclose(t_diff, 0, atol=1e-2).astype(int)  # 0.01 for floating point errors
 
-    # TODO (Tony): Eliminate this element-wise step by fixing the weight matrix during initialization.
-    # Presynaptic neurons' weight sum for each neuron
-    # start = time.time()  # DEBUG
-    element_wise = np.multiply(self.network_weight, self.network_conn)
-    # print(f"{' '*15}element-wise calc time: {(time.time()-start)*1000} ms")  # DEBUG
-
-    # TODO (Tony): Eliminate transpose because 1D is either pre-/post-pended with 1 dimension
-    # start = time.time()  # DEBUG
-    spiked_input_w_sums = np.matmul(s_flag.T, element_wise)
-    # print(f"{' '*15}matmul calc time: {(time.time() - start)*1000} ms")  # DEBUG
-
-    self.spiked_input_w_sums = spiked_input_w_sums
+    self.spiked_input_w_sums = self.network_weight.T.dot(s_flag).T
 
   def __run_stdp_on_all_connected_pairs(self)-> float:
     """Checks all connected pairs and update weights based on STDP scheme.
@@ -427,7 +409,7 @@ class LIF_Network:
 
             ### Spotlight is on i ### SPIKED neuron connecting to others
             # if i is pre-synaptic to j, update W(i,j)
-            if self.network_conn[i][j] == True:
+            if self.network_conn[i, j] == 1:
 
               # Check if j has a spike in transit, and if so, use the spike before last:
               # Smallest value is syn_delay; range: [syn_delay, t+syn_delay]
@@ -461,7 +443,7 @@ class LIF_Network:
 
             ### Spotlight is on i ### SPIKED neuron receiving connection
             # if j is pre-synaptic to i, update W(j,i)
-            if self.network_conn[j][i] == True: 
+            if self.network_conn[j, i] == 1: 
               
               # check if j has a spike in transit, and if so, use the spike before last:
               # Largest value is syn_delay; range: [syn_delay-t-10000, syn_delay]
@@ -1246,8 +1228,7 @@ class LIF_Network:
 
       s_difference = self.t_current-(self.t_currentSpike+self.synaptic_delay)
       s_flag = 1.0 * (abs(s_difference) < .01)
-      # TODO (Tony): Move element-wise multiplication to weight initialization step so to calculate just once.
-      self.network_input = np.matmul(s_flag.T, self.network_weight * self.network_conn)
+      self.network_input = self.network_weight.T.dot(s_flag).T
 
       # STDP:
       if self.flag_wUpdate.any():
@@ -1269,7 +1250,7 @@ class LIF_Network:
 
               ### Spotlight is on i ### SPIKED neuron connecting to others
               # if i is pre-synaptic to j, update W(i,j)
-              if self.network_conn[i][j] == 1:
+              if self.network_conn[i, j] == 1:
 
                 # check if j has a spike in transit, and if so, use the spike before last:
                 # Smallest value is syn_delay; range: [syn_delay, t+syn_delay]
@@ -1296,7 +1277,7 @@ class LIF_Network:
 
               ### Spotlight is on i ### SPIKED neuron receiving connection
               # if j is pre-synaptic to i, update W(j,i)
-              if self.network_conn[j][i] == 1: 
+              if self.network_conn[j, i] == 1: 
                 
                 # check if j has a spike in transit, and if so, use the spike before last:
                 # Largest value is syn_delay; range: [syn_delay-t-10000, syn_delay]
