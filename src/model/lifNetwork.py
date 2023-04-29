@@ -120,7 +120,7 @@ class LIF_Network:
     self.kappa_ali_code = 400
     self.kappa_noise_ali_code = 1  # Not specified, which equals to setting the variable as 1
     self.v_spike = 20              # Not in paper, but shows up in Ali's codebase           # [mV] The voltage that spikes rise to ((AP Peak))
-    self.g_leak_ali_code = 10      # The value Ali used in his code
+    self.g_leak_ali_code = 10      # The value Ali used in his code, 500x the value stated in the paper (0.02)
     self.g_poisson = 1.3                                                                    # [mS/cm^2] conductivity of the extrinsic poisson inputs
     self.v_ali = np.random.uniform(low=-10, high=10, size=(self.n_neurons,)) - 45           # [mV] Current membrane potential - Initialized with Unif(-55, -35)
     self.tau_spike = 1                                                                      # [ms] Time for an AP spike, also the length of the absolute refractory period
@@ -1186,55 +1186,67 @@ class LIF_Network:
     ii = 0
     for t in range(euler_steps):
 
-      # Get poisson inputs:
+      # Calculate Poisson noise
       self.__generate_poisson_noise()
 
-      # Integrate inputs from noise and synapses
-      # Updating to exp decay...
-      # self.noise_g = (1-self.dt) * self.noise_g + self.g_poisson * self.poisson_input
+      # Noise conductivity update
+      # self.noise_g = (1-self.dt) * self.noise_g + self.g_poisson * self.poisson_input  # Non exp decay
       self.g_noise = self.g_noise * np.exp(-self.dt/self.tau_syn) + self.g_poisson * self.poisson_noise_spike_flag
-      # Updating to exp decay...
-      # self.g_syn = (1-self.dt) * self.g_syn + self.network_coupling * self.network_input
+      
+      # Synaptic conductivity update
+      # self.g_syn = (1-self.dt) * self.g_syn + self.network_coupling * self.network_input  # Non exp decay
       network_coupling = self.kappa_ali_code / self.n_neurons
       external_strength = self.kappa_ali_code / 5
-      self.g_syn = self.g_syn * np.exp(-self.dt/self.tau_syn) + network_coupling * self.spiked_input_w_sums + external_strength*external_spiked_input_w_sums[ii][:]
+      self.g_syn = (self.g_syn * np.exp(-self.dt/self.tau_syn) 
+                    + network_coupling * self.spiked_input_w_sums 
+                    + external_strength * external_spiked_input_w_sums[ii][:])
 
-      # Ispiked_input_w_sums reset
+      # Variable reset
       self.network_input = np.zeros([self.n_neurons,])
       self.flag_wUpdate = np.zeros([self.n_neurons,])
       dW = 0
 
-      # Update V and Thr
-      # self.v = self.v + self.dt * ( ( self.g_leak*(self.v_rest - self.v) - (self.g_noise + self.g_syn) * self.v) / self.tau_m )
-      # Set g_leak to 1 instead of 0.02, may solve why there isn't much activity
-      self.v = self.v + self.dt * ( (self.g_leak_ali_code*(self.v_rest - self.v) - (self.g_noise + self.g_syn) * self.v) / self.tau_m )
+      # Membrane potential and action-potential threshold update
+      # NOTE (Tony): Ali used a g_leak value that is 500x stated in the paper 0.02 * 500 = 10
+      # Case 1: g_leak (paper's value) = 0.02
+      # self.v = (self.v 
+      #           + (self.dt/self.tau_m) * (self.g_leak * (self.v_rest - self.v) 
+      #                                     - self.v * (self.g_noise + self.g_syn)))
+      # Case 2: g_leak_ali_code (Ali's code value) = 10
+      self.v = (self.v 
+                + (self.dt/self.tau_m) * (self.g_leak_ali_code * (self.v_rest - self.v) 
+                                          - self.v * (self.g_noise + self.g_syn)))
       self.v_thr = self.v_thr + self.dt * (self.v_thr_rest - self.v_thr) / self.tau_m
 
-      # Do spike calculations:
-      sp = (self.v >= self.v_thr) * (self.flag_spike == 0)
+      # Evaluate if reached AP voltage threshold
+      sp = np.logical_and(np.greater_equal(self.v, self.v_thr), 
+                          np.equal(self.flag_spike, 0))
       self.flag_spike[sp] = 1
       self.flag_wUpdate[sp] = 1
+
+      # Time tracker switcharoo
       self.t_prevSpike[sp] = self.t_currentSpike[sp]
       self.t_currentSpike[sp] = self.t_current
 
-      f = (self.flag_spike == 1)
-      self.v[f] = self.v_spike
-      # self.v_thr[f] = self.v_rf_spike
+      reached_spike_thresh = np.equal(self.flag_spike, 1)
+      self.v[reached_spike_thresh] = self.v_spike
 
-      t_offset = self.t_currentSpike+self.tau_spike <= self.t_current
-      self.flag_spike[t_offset * f] = 0
-      self.v[t_offset * f] = self.v_reset
-      self.v_thr[t_offset * f] = self.v_thr_spike  # CORRECTION FROM PREVIOUS COMMENTED OUT ONE
+      t_offset = np.less_equal(self.t_currentSpike, self.t_current-self.tau_spike)
+      not_in_abs_ref_and_passed_ap_threshold = np.logical_and(t_offset, 
+                                                              reached_spike_thresh)
+      self.flag_spike[not_in_abs_ref_and_passed_ap_threshold] = 0
+      self.v[not_in_abs_ref_and_passed_ap_threshold]          = self.v_reset
+      self.v_thr[not_in_abs_ref_and_passed_ap_threshold]      = self.v_thr_spike
 
-      s_difference = self.t_current-(self.t_currentSpike+self.synaptic_delay)
-      s_flag = 1.0 * (abs(s_difference) < .01)
+      s_difference = np.subtract(self.t_current - self.synaptic_delay, self.t_currentSpike)
+      s_flag = np.isclose(s_difference, 0, atol=1e-2).astype(int)
       self.network_input = self.network_weight.T.dot(s_flag).T
 
       # STDP:
       if self.flag_wUpdate.any():
         for i in range(self.n_neurons):
           if (self.flag_wUpdate[i] == 1):  ### SPOTLIGHT ###
-            self.spikeRecord = np.append(self.spikeRecord,np.array([i,self.t_current]))
+            self.spikeRecord = np.append(self.spikeRecord,np.array([i, self.t_current]))
             for j in range(self.n_neurons):
               
               # There is a little bit of asymmetry here, that in the case A and B, 
