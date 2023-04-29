@@ -99,7 +99,7 @@ class LIF_Network:
     self.g_noise             = np.zeros((self.n_neurons, ), dtype=float)                               # Tracker of dynamic noise conductivity
     self.flag_wUpdate        = np.zeros((self.n_neurons, ), dtype=int)                                 # Tracker of connetion weight updates. When a neuron spikes, it is flagged as needing update on its connection weight.
     self.spiked_input_w_sums = np.zeros((self.n_neurons, ), dtype=float)                               # Tracker of the connected presynaptic weight sum for each neuron (Eq 4: weight * Dirac Delta Distribution)
-    self.network_conn        = np.zeros((self.n_neurons, self.n_neurons), dtype=bool)                  # Tracker of Neuron connection matrix: from row-th neuron to column-th neuron
+    self.network_conn        = np.zeros((self.n_neurons, self.n_neurons))                              # Tracker of Neuron connection matrix: from row-th neuron to column-th neuron
     self.network_weight      = np.random.random(size=(self.n_neurons, self.n_neurons))                 # Tracker of Neuron connection weight matrix: from row-th neuron to column-th neuron
 
     # STDP paramters
@@ -217,22 +217,20 @@ class LIF_Network:
 
     # Initialize network connectivity matrix
     # TODO (Tony): Change this to int instead of bool
-    self.network_conn = np.random.choice(a=[True, False], 
+    self.network_conn = np.random.choice(a=[1, 0], 
                                          p=[proba_conn, (1-proba_conn)], 
                                          size=(self.n_neurons, self.n_neurons))
-    # Generate weight matrix
-    self.network_weight = np.random.random(size=(self.n_neurons, self.n_neurons))
+    self.network_conn = sparse.csr_array(self.network_conn)
+
+    # Initialize weight matrix
+    self.network_weight = self.network_conn.copy()  # Deep copy
+    self.network_weight.data = np.random.random(size=self.network_weight.nnz)
     
     # Normalized to mean conductivity (i.e., `mean_w`)
     # TODO (Tony): Fix masking behavior when network_conn is changed to int instead of bool because it will be index selecting.
-    connected_subset = self.network_weight[self.network_conn]  # Filter out non-connected
-    current_nn_mean = np.mean(connected_subset)
+    current_nn_mean = self.network_weight.mean(axis=None, dtype=float)
     normalization_scale = mean_w / current_nn_mean
-    self.network_weight = np.multiply(normalization_scale, self.network_weight)
-    
-    # Mark non-connected pairs' weight as zero
-    # TODO (Tony): Does sparse array multiplication return a sparse array as well?
-    self.network_weight = np.multiply(self.network_conn, self.network_weight)
+    self.network_weight *= normalization_scale
 
     # COMMENTED OUT: >>> Hard bounding is enforced during weight update
     # Hard bound weight to [0, 1]
