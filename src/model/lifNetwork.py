@@ -1255,35 +1255,7 @@ class LIF_Network:
             else: 
               temporal_diff = self.t_prevSpike[j] - self.t_currentSpike[i] + self.synaptic_delay
               dW = dW + self.__stdp_w_update(temporal_diff,j,i)
-            
 
-      if self.flag_wUpdate.any():
-        for i in range(self.n_neurons):
-          if (self.flag_wUpdate[i] == 1):  ### SPOTLIGHT ###
-            self.spikeRecord = np.append(self.spikeRecord,np.array([i,self.t_current]))
-            for j in range(self.n_neurons):
-              if self.network_conn[i, j] == 1:
-                temporal_diff = self.t_currentSpike[i] - self.t_currentSpike[j]   + self.synaptic_delay
-                
-                # Case A
-                if temporal_diff > 0:  # ??? temporal_diff >= 0 ??? - Why not triage like Case C and D? 
-                  dW = dW + self.__stdp_w_update(temporal_diff,i,j)
-                # Case B
-                else:
-                  temporal_diff = self.t_currentSpike[i] - self.t_prevSpike[j] + self.synaptic_delay
-                  dW = dW + self.__stdp_w_update(temporal_diff,i,j)
-
-              ### Spotlight is on i ### SPIKED neuron receiving connection
-              # if j is pre-synaptic to i, update W(j,i)
-              if self.network_conn[j, i] == 1: 
-                temporal_diff =  self.t_currentSpike[j] - self.t_currentSpike[i] + self.synaptic_delay
-                # Case C
-                if temporal_diff < 0: 
-                  dW = dW + self.__stdp_w_update(temporal_diff,j,i)
-                # Case D
-                else: 
-                  temporal_diff = self.t_prevSpike[j] - self.t_currentSpike[i] + self.synaptic_delay
-                  dW = dW + self.__stdp_w_update(temporal_diff,j,i)
                               
       # End of Epoch:
       tix = int(self.euler_step_idx-euler_step_idx_start)
