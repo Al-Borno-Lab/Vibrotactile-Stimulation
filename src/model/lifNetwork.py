@@ -226,7 +226,7 @@ class LIF_Network:
     self.network_weight.data = np.random.random(size=self.network_weight.nnz)
     
     # Normalized to mean conductivity (i.e., `mean_w`)
-    current_nn_mean = self.network_weight.mean(axis=None, dtype=float)
+    current_nn_mean = self.calc_nn_mean_w()
     normalization_scale = mean_w / current_nn_mean
     self.network_weight *= normalization_scale
 
@@ -286,7 +286,7 @@ class LIF_Network:
   def calc_nn_mean_w(self) -> float:
     """Calculate and return neural network mean connection weight at time of call."""
     
-    mean_network_w = self.network_weight.mean(axis=None, dtype=float)
+    mean_network_w = np.mean(self.network_weight.data, dtype=float)
     return mean_network_w
 
   def __generate_poisson_noise(self, poisson_noise_lambda_hz:int=20) -> None:
@@ -1255,79 +1255,35 @@ class LIF_Network:
             else: 
               temporal_diff = self.t_prevSpike[j] - self.t_currentSpike[i] + self.synaptic_delay
               dW = dW + self.__stdp_w_update(temporal_diff,j,i)
+            
 
-
-      # if self.flag_wUpdate.any():
-      #   for i in range(self.n_neurons):
-      #     if (self.flag_wUpdate[i] == 1):  ### SPOTLIGHT ###
-      #       self.spikeRecord = np.append(self.spikeRecord,np.array([i,self.t_current]))
-      #       for j in range(self.n_neurons):
-              
-      #         # There is a little bit of asymmetry here, that in the case A and B, 
-      #         # the temporal diff is always greater equal than 0 (the case for equal
-      #         # to zero is B and it is not supposed to happen because it assumes
-      #         # synaptic delay == 0).
-      #         #
-      #         # For C and D, the temporal difference straddles 0 and thus makes sense
-      #         # to use <0 and >=0 in the if-else to differentiate whether the presynaptic
-      #         # partner of the neuron in spotlit (i) is being transmitted.
-      #         # However, the if-else cannot tell the difference between whether 
-      #         # spike from the presynaptic partner is still in transit or it never spiked.
-
-      #         ### Spotlight is on i ### SPIKED neuron connecting to others
-      #         # if i is pre-synaptic to j, update W(i,j)
-      #         if self.network_conn[i, j] == 1:
-
-      #           # check if j has a spike in transit, and if so, use the spike before last:
-      #           # Smallest value is syn_delay; range: [syn_delay, t+syn_delay]
-      #           temporal_diff = self.t_currentSpike[i] - self.t_currentSpike[j]   + self.synaptic_delay
-      #           # print(f"{' '*10} {self.t_currentSpike[i]} - {self.t_currentSpike[j]} + {self.synaptic_delay}")
+      if self.flag_wUpdate.any():
+        for i in range(self.n_neurons):
+          if (self.flag_wUpdate[i] == 1):  ### SPOTLIGHT ###
+            self.spikeRecord = np.append(self.spikeRecord,np.array([i,self.t_current]))
+            for j in range(self.n_neurons):
+              if self.network_conn[i, j] == 1:
+                temporal_diff = self.t_currentSpike[i] - self.t_currentSpike[j]   + self.synaptic_delay
                 
-      #           # Case A
-      #           if temporal_diff > 0:  # ??? temporal_diff >= 0 ??? - Why not triage like Case C and D? 
-      #             # - i has spike in transit (both spiked at the same time or j spiked no more than delay-time ago)
-      #             # - LTD always, regardless of when j spiked
-      #           #   print(f"A: STDP on {i} -> {j} at eulerstep {t} of time {self.t} ms")
-      #           #   print(f"{' '*10} {self.t_currentSpike[i]} - {self.t_currentSpike[j]} + {self.synaptic_delay}")
-      #           #   print(f"{' '*10} t_currentSpike[{i}]-t_currentSpike[{j}]: temporal_diff: {temporal_diff} ms")
-      #             dW = dW + self.__stdp_w_update(temporal_diff,i,j)
-      #           # Case B
-      #           else:
-      #             # - This can only happen is synaptic delay = 0 
-      #             # - And this is always LTD
-      #             temporal_diff = self.t_currentSpike[i] - self.t_prevSpike[j] + self.synaptic_delay
-      #           #   print(f"B: STDP on {i} -> {j} at eulerstep {t} of time {self.t} ms")
-      #           #   print(f"{' '*10} {self.t_currentSpike[i]} - {self.t_prevSpike[j]} + {self.synaptic_delay}")
-      #           #   print(f"{' '*10} t_currentSpike[{i}]-t_prevSpike[{j}]: temporal_diff: {temporal_diff} ms")
-      #             dW = dW + self.__stdp_w_update(temporal_diff,i,j)
+                # Case A
+                if temporal_diff > 0:  # ??? temporal_diff >= 0 ??? - Why not triage like Case C and D? 
+                  dW = dW + self.__stdp_w_update(temporal_diff,i,j)
+                # Case B
+                else:
+                  temporal_diff = self.t_currentSpike[i] - self.t_prevSpike[j] + self.synaptic_delay
+                  dW = dW + self.__stdp_w_update(temporal_diff,i,j)
 
-      #         ### Spotlight is on i ### SPIKED neuron receiving connection
-      #         # if j is pre-synaptic to i, update W(j,i)
-      #         if self.network_conn[j, i] == 1: 
-                
-      #           # check if j has a spike in transit, and if so, use the spike before last:
-      #           # Largest value is syn_delay; range: [syn_delay-t-10000, syn_delay]
-      #           temporal_diff =  self.t_currentSpike[j] - self.t_currentSpike[i] + self.synaptic_delay
-      #           # print(f"{' '*10} {self.t_currentSpike[j]} - {self.t_currentSpike[i]} + {self.synaptic_delay}")
-                
-      #           # Case C
-      #           if temporal_diff < 0: 
-      #             # - j's spike arrived at i before i spiked, thus LTP
-      #           #   print(f"C: STDP on {j} -> {i} at eulerstep {t} of time {self.t} ms")
-      #           #   print(f"{' '*10} t_currentSpike[{j}]-t_currentSpike[{i}]: temporal_diff: {temporal_diff} ms")
-      #           #   print(f"{' '*10} {self.t_currentSpike[j]} - {self.t_currentSpike[i]} + {self.synaptic_delay}")
-      #             dW = dW + self.__stdp_w_update(temporal_diff,j,i)
-      #           # Case D
-      #           else: 
-      #             # - j has spike in transit (both spiked at the same time or j spiked no more than delay-time ago)
-      #             # - Can be LTP or LTD, really depends when the last time j spiked.
-      #             #   - LTD if j's previous spike is less than delay-time ago from i's current spike.
-      #             #   - LTP if j's previous spike is more than delay-time ago from i's current spike.
-      #             temporal_diff = self.t_prevSpike[j] - self.t_currentSpike[i] + self.synaptic_delay
-      #           #   print(f"D: STDP on {j} -> {i} at eulerstep {t} of time {self.t} ms")
-      #           #   print(f"{' '*10} {self.t_prevSpike[j]} - {self.t_currentSpike[i]} + {self.synaptic_delay}")
-      #           #   print(f"{' '*10} t_prevSpike[{j}]-t_currentSpike[{i}]: temporal_diff: {temporal_diff} ms")
-      #             dW = dW + self.__stdp_w_update(temporal_diff,j,i)
+              ### Spotlight is on i ### SPIKED neuron receiving connection
+              # if j is pre-synaptic to i, update W(j,i)
+              if self.network_conn[j, i] == 1: 
+                temporal_diff =  self.t_currentSpike[j] - self.t_currentSpike[i] + self.synaptic_delay
+                # Case C
+                if temporal_diff < 0: 
+                  dW = dW + self.__stdp_w_update(temporal_diff,j,i)
+                # Case D
+                else: 
+                  temporal_diff = self.t_prevSpike[j] - self.t_currentSpike[i] + self.synaptic_delay
+                  dW = dW + self.__stdp_w_update(temporal_diff,j,i)
                               
       # End of Epoch:
       tix = int(self.euler_step_idx-euler_step_idx_start)
