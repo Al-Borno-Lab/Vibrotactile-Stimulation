@@ -1,33 +1,51 @@
 ! 2023-07-26 - Commented by Anthony, original code written by Ali.
 
+!!! Discrepencies between code and Paper !!!
+! - D=1.3d0 >>> This param looks like kappa_noise, but is 50x the value stated 
+!   in the paper (assuming kappa_noise).
+! - tau=150.d0 >>> This is the mean of the membrane capacitance random variable
+!   of which the paper used 3 instead; thus the code is 50x the paper's value.
+!   Here the code is implemented as Box Mueller Method.
+! - sigtau=7.5 >>> This is the stdev of the membrane capacitance random variable
+!   of which the paper used 0.15 instead; thus the code is 50x the paper's value.
+!   Here the code is implemented as Box Mueller Method.
+
 
 !! Setting the parameters
 implicit none
-real*8,parameter:: fnoise=20.d0    ! [Hz] Poisson noisy input into excitatory synapses
-real*8,parameter:: ti=1.d-1        ! [ms] Resolution or time-step per Euler scheme step
-real*8,parameter:: tu=1000.d0      ! [ms] Time duration to relax / warm-up the network
-real*8,parameter:: D=1.3d0
-real*8,parameter:: beta=1.4d0
-real*8,parameter:: tau=150.d0
-real*8,parameter:: sigtau=7.5
+!! Some model parameters
+real*8,parameter:: ti=1.d-1        ! [ms] Time per Euler scheme step
+real*8,parameter:: tu=1000.d0      ! [ms] Network warmup/relax duration
+real*8,parameter:: sparcity=0.07   ! Unused > seems like connection probability
+real*8,parameter:: sigw=0.1d0      ! ??? Unused / Unknown
+integer,parameter:: maxspk=500     ! ??? Unknown
+integer,parameter:: seed_index=1   ! ??? Unused / Unknown
+
+!! Neuron physiology parameters
+real*8,parameter:: D=1.3d0         ! ??? [mS/cm^2] See notes above
+real*8,parameter:: vth_rest=-40.d0 ! [mV] Spiking threshold when at rest
 real*8,parameter:: v_rest=-38.d0   ! [mV] Resting potential
-real*8,parameter:: vth_rest=-40.d0 ! [mV] Spiking threshold when neuron is at rest
-real*8,parameter:: tau_th=5.d0     ! [ms] Time constant for threshold dynamic func (eq. 3)
-real*8,parameter:: v_syn=0.d0      ! [mV] Synaptic reversal potential for noise current (eq. 5)
+real*8,parameter:: v_syn=0.d0      ! [mV] Reversal potential for noise current (eq. 5)
+real*8,parameter:: tau_th=5.d0     ! [ms] tau for threshold dynamic func (eq. 3)
 real*8,parameter:: tau_syn=1.d0    ! [ms] Synaptic time constant (eq. 3, 4, 6)
 real*8,parameter:: t_d=3.d0        ! [ms] Synaptic transmission delay (eq. 4)
-real*8,parameter:: sparcity=0.07
-real*8,parameter:: sigw=0.1d0
-real*8,parameter:: tau_R=4.d0      ! [scalar] LTD-to-LTP time-constant ratio (Depression time scale)
-real*8,parameter:: taup=10.d0      ! [ms] STDP decay time for long-term potentiation (tau_positive)
+real*8,parameter:: tau=150.d0      ! ??? [micro-Farad/cm^2] See notes above
+real*8,parameter:: sigtau=7.5      ! ??? [micro-Farad/cm^2] See notes above
+
+!! STDP Dynamics
+real*8,parameter:: beta=1.4d0      ! Depression to potentitation ratio (eq. 7)
 real*8,parameter:: mean_Weight=0.5d0
-integer,parameter:: maxspk=500
-integer,parameter:: seed_index=1
+real*8,parameter:: tau_R=4.d0      ! LTD-to-LTP time-constant ratio (Depression time scale)
+real*8,parameter:: taup=10.d0      ! [ms] STDP decay time for long-term potentiation (tau_positive)
+
+!! Poisson Noise input
+real*8,parameter:: fnoise=20.d0    ! [Hz] Poisson noisy input
+
 !! Rectangular spike parameters
-real*8,parameter:: vth_spike=0.d0  ! [mV] Spike threshold that is reset to right after rectangular spike
-real*8,parameter:: v_reset=-67.d0  ! [mV] Membrane pontential that is reset to right after rectangular spike
-real*8,parameter:: t_spike=1.d0    ! [ms] Duration of rectangular spike (default = 1 ms)
-real*8,parameter:: v_spike=20.d0   ! [mV] Potential of rectangular spike
+real*8,parameter:: vth_spike=0.d0  ! [mV] Spike threshold right after rect spike
+real*8,parameter:: v_reset=-67.d0  ! [mV] Pontential right after rect spike
+real*8,parameter:: t_spike=1.d0    ! [ms] Rect spike duration
+real*8,parameter:: v_spike=20.d0   ! [mV] Rect spike potential
 real*8,parameter:: Delta_V=vth_spike-v_reset
 
 !! Data read from terminal input
@@ -36,12 +54,13 @@ real*8:: A_stim        ! [unitless] Dimensionless stimulation strength
 integer:: M_electrode  ! [count] Numbers of stimulation sites
 integer:: stim_dur     ! [s] Stimulation duration in seconds
 integer:: net_index    ! ??? Network drive index? - Looks to be used to identify file writing
+
 !! Read in from model_input.in
-real*8:: lamda         ! [unitless] Scales the weight update per spike, eta in the paper (default = 2.d-2)
-real*8:: tmax          ! [s] Total simulation time (default = 2500.d0)
-real*8:: tchunk        ! [s] Save data and Calculate the Kuramoto order parameter every tchunk seconds (default = 10.d0)
-real*8:: capa          ! [mS/cm^2] Max coupling strength (default = 400.d0)
-integer:: Nr           ! [count] Total number of neurons (defaults = {200, 500, 1000, 2000})
+real*8:: lamda  ! Scales the weight update per spike, eta in the paper (default = 2.d-2)
+real*8:: tmax   ! [s] Total simulation time (default = 2500.d0)
+real*8:: tchun  ! [s] Save data and calculate the Kuramoto order parameter every tchunk seconds (default = 10.d0)
+real*8:: capa   ! [mS/cm^2] Max coupling strength (default = 400.d0)
+integer:: Nr    ! Total number of neurons (defaults = {200, 500, 1000, 2000})
 
 integer:: Npre
 integer:: Npost
@@ -97,7 +116,7 @@ real*8:: dti
 real*8:: total_syn
 real*8:: delta_time(2)
 real*8:: sum1
-real*8:: beta_tau_R_lamndba
+real*8:: beta_tau_R_lamndba  ! Variable to hold the LTD weight scaling scalar
 real*8:: sw_outCR
 real*8:: Astim1
 real*8:: Astim2
@@ -130,7 +149,7 @@ real*8,allocatable, dimension(:):: cpl
 real*8,allocatable, dimension(:):: x1D
 real*8,allocatable, dimension(:):: sw_inCR
 real*8,allocatable, dimension(:,:):: tspk
-real*8,allocatable, dimension(:,:):: sw
+real*8,allocatable, dimension(:,:):: sw  ! [scale] Scales the coupling strength, which is analogous to conductance - It is also clipped between [0, 1].
 real*8,allocatable, dimension(:,:):: sw0
 real*8,allocatable, dimension(:,:):: dw
 real*8,allocatable, dimension(:,:):: tsh
@@ -192,7 +211,7 @@ open(11,file=trim(cwd)//"/model_input.in")  ! Read the file model_input.in
 read(11,*)lamda  ! [unitless] Scales the weight update per spike - variable eta in the paper
 read(11,*)tmax   ! [s] Total simulation time
 read(11,*)tchunk ! [s] Save data and Calculate the Kuramoto order parameter every tchunk seconds
-read(11,*)capa   ! [8mS/cm^2] Max coupling strength
+read(11,*)capa   ! [mS/cm^2] Max coupling strength
 read(11,*)Nr     ! [count] Total number of neurons
 close(11)
 
@@ -211,8 +230,8 @@ jtime=int(tmax/tchunk)       ! [count] Total number of times to save data and ca
 pi2=8*atan(1.d0)             ! ???
 stdp_max=int(1000.d0/ti)     ! [count] ???
 dti=1.d0-ti                  ! [ms] ???
-beta_tau_R_lamndba=0.d0      ! ??? 
-beta_tau_R_lamndba=(beta/tau_R)*lamda  ! ???
+beta_tau_R_lamndba=0.d0      ! Init
+beta_tau_R_lamndba=(beta/tau_R)*lamda  ! Scalar for LTD weight update
 CR_win=0  ! ??? 
 CR_win2=0 ! ???
 
@@ -359,7 +378,7 @@ capa=capa/Nr  ! [mS/cm^2]  Equation 4 in the paper, scales the max coupling stre
 call random_number(un1)  ! Subroutine to draw pseudo random number from Unif(0, 1) and save to variable `un1`
 call random_number(un2)  ! Subroutine to draw pseudo random number from Unif(0, 1) and save to variable `un2`
 
-taum=sigtau*sqrt(-2.d0*log(un1))*cos(pi2*un2)+tau ! [micro-Farad/cm^2] Membrane capacitance
+taum=sigtau*sqrt(-2.d0*log(un1))*cos(pi2*un2)+tau ! [micro-Farad/cm^2] Membrane capacitance generated via Box Muller Method to generate normal random variable at mean `tau` and stdev `sigtau`
 vth=vth_rest*un1
 v0=v_reset*un2
 gs0=0.d0
@@ -372,7 +391,7 @@ itrch=0
 tspk=0.d0
 itime_save=0
 poi1=0
-sw=0
+sw=0  ! Synaptic weight
 !call init_weights_Nr(Nr,Npost,mean_weight,adj,sw0)
 call init_weights(Nr,Npost,mean_weight,sw)
 
@@ -397,7 +416,7 @@ call CR_groups_distance (Nr,coor,M_electrode,CR_neuron,CR_n)
 dgs=0.d0
 do i=1,ntu
     t=i*ti;
-    call poi_array(Nr,fr,poi1)
+    call poi_array(Nr,fr,poi1)  ! Generate Poisson noise spike train
     gn=dti*gn0 + D*poi1                       ! eq. 6
     gs=dti*gs0 + capa*dgs                     ! eq. 4
     v=v0+ti*(((v_rest-v0) -(gs+gn)*v0)/taum)  ! eq. 2
@@ -524,16 +543,36 @@ end
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 subroutine CR_regular (Nr,f_CR,A_stim,M_electrode,ntmax,ti,tau,Delta_V,CR_neuron,CR_stim)
-!November 2021
+    !! Multisite CR Stimulation (Paper Section V and subsectino C) !!
 implicit none
-    integer, intent(in):: Nr,M_electrode,ntmax
-    real*8,intent(in)::ti,f_CR,tau,Delta_V,A_stim
+    integer, intent(in):: Nr
+    integer, intent(in):: M_electrode
+    integer, intent(in):: ntmax
+    real*8,intent(in):: ti
+    real*8,intent(in):: f_CR
+    real*8,intent(in):: tau      ! [micro-Farad/cm^2] Membrane capacitance Gaussian distribution mean ??? The paper defaults=3 whereas the code here defaults=150
+    real*8,intent(in):: Delta_V  ! [mV] V_th_spike = V_reset
+    real*8,intent(in):: A_stim
     integer, intent(in)::CR_neuron(Nr)
     real*8,intent(out):: CR_stim(Nr,ntmax)
-    real*8,parameter:: stim_length1=0.4,tsilent=0.2,stim_length2=3.d0
-    real*8:: T_CR,Delta_CR,t,As1,As2,S1
+    real*8,parameter:: stim_length1=0.4  ! [ms] Excitatory pulse duration
+    real*8,parameter:: tsilent=0.2       ! [ms] Time separation between Excitatory- and Inhibitory-pulse
+    real*8,parameter:: stim_length2=3.d0 ! [ms] Inhibitory pulse duration
+    real*8:: T_CR
+    real*8:: Delta_CR
+    real*8:: t
+    real*8:: As1
+    real*8:: As2
+    real*8:: S1
     !real*8:: I_stim(M_electrode,ntmax)
-    integer:: CR_period_dt,Delta_CR_dt,st1,st2,st3, electrodes(M_electrode),M_shuffled(M_electrode),electrode
+    integer:: CR_period_dt
+    integer:: Delta_CR_dt
+    integer:: st1
+    integer:: st2
+    integer:: st3
+    integer:: electrodes(M_electrode)
+    integer:: M_shuffled(M_electrode)
+    integer::electrode
     integer::k1,i,j, lb, ub,k2,i1,j1,k3,sigma_CR,ntmax1,k1ub
     real*8,allocatable,dimension(:,:):: I_stim
 
@@ -1017,14 +1056,17 @@ END
 
 
 subroutine poi_array(Nr,mean,poi)
+    !! Poisson Noise generation !!
+    !! When n > 20 and np < 5, Binomial(n, p) and Poi(mean = np) are similar
+    !! This is why the code below simulates Poisson RV in a Binomial fasion.
     integer,intent(in):: Nr
     real*8,intent(in):: mean
     integer,intent(out):: poi(Nr)
     real*8:: un1(Nr)
-    integer::j
+    integer:: j
 
     un1=0.d0
-    call random_number(un1)
+    call random_number(un1)  ! Pseudo random number ~ Unif(0, 1)
     poi=0
     do j=1,Nr
        if (un1(j) .lt. mean) poi(j)=1
