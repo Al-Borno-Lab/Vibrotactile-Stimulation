@@ -254,7 +254,7 @@ write (out_file(1),"('1_odpar_fCR_',i0,'_M_',i0,'_Astim_',i0,'_net_',i0,'_dur',i
 !write (out_file(2),"('2_spk_fCR_',i0,'_M_',i0,'_sigma_CR_',i0,'_Astim_',i0,'_net_',i0,'_dur',i0,'.dat')") int(f_CR*10),M_electrode,int(SD_CR*1000),int(A_stim*1000),net_index,stim_dur
 
        
-open(unit=111,status='unknown',file=trim(outputpath)//trim(out_file(1)))
+open(unit=111,status='unknown',file=trim(outputpath)//trim(out_file(1)))  !! Output file 111
 !open(unit=224,status='unknown',file=trim(outputpath)//trim(out_file(2)))
 
 !!!!!!!!!! Open and read network_dimension data to variables !!!!!!!!!!
@@ -513,6 +513,7 @@ do itime=1,jtime
 
         do i1=1,Nr
             do j1=1,Npost
+                !! Clipping the synaptic weight between 0 and 1
                 if ( sw(i1,j1) .gt. 1.d0) sw(i1,j1)=1.d0
                 if ( sw(i1,j1) .lt. 0.d0) sw(i1,j1)=0.d0
             enddo
