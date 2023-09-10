@@ -3,6 +3,9 @@
 !!! Discrepencies between code and Paper !!!
 ! - D=1.3d0 >>> This param looks like kappa_noise, but is 50x the value stated 
 !   in the paper (assuming kappa_noise).
+!   - 2023-09-09 (Anthony) - This value matches that of kappa_noise, and the 50x
+!     scale aligns with how the paper scales the membrane capacitance value by 50x
+!     from what was stated in the paper.
 ! - tau=150.d0 >>> This is the mean of the membrane capacitance random variable
 !   of which the paper used 3 instead; thus the code is 50x the paper's value.
 !   Here the code is implemented as Box Mueller Method.
