@@ -12,11 +12,6 @@
 source /home/leean9/.bashrc
 conda activate nest
 
-# Pull latest codebase
-# git -C /data001/projects/leean9/Vibrotactile-Stimulation pull 
-# git -C ~/Vibrotactile-Stimulation checkout model_testing
-# echo "**git pull completed; project directory up-to-date.**"
-
 # Call model testing script
-export PYTHONPATH=$PYTHONPATH:/data001/projects/leean9/Vibrotactile-Stimulation  # So Python knows where to find src
+export PYTHONPATH=$PYTHONPATH:/data001/projects/leean9/Vibrotactile-Stimulation/AYL_Vibro_22/  # So Python knows where to find src
 python3 -m src.modelTestingScripts.22_BasedOn16_All_ali_but_thr_method_Tony
