@@ -37,15 +37,14 @@ class LIF_Network:
                dimensions = [[0,100],[0,100],[0,100]],
                auto_random_connect: bool = True) -> None:
 
+    # Neuron count
+    self.n_neurons = n_neurons
 
     # Values that Ali uses in his codebase
     self.v_spike = 20  # Not in paper, but shows up in Ali's codebase                       # [mV] The voltage that spikes rise to ((AP Peak))
     self.g_leak_ali = 10  # The value Ali used in his code
     self.v_ali = np.random.uniform(low=-10, high=10, size=(self.n_neurons,)) - 45           # [mV] Current membrane potential - Initialized with Unif(-55, -35)
     self.tau_spike = 1                                                                      # [ms] Time for an AP spike, also the length of the absolute refractory period
-
-    # Neuron count
-    self.n_neurons = n_neurons
     
     # Spatial organization
     self.dimensions = dimensions
