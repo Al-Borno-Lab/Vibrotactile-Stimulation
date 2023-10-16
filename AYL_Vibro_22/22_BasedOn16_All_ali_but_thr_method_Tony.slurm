@@ -10,12 +10,12 @@
 
 # Activate the proper conda env
 source /home/leean9/.bashrc
-conda activate vibro
+conda activate nest
 
 # Pull latest codebase
-git -C /data001/projects/leean9/Vibrotactile-Stimulation pull 
+# git -C /data001/projects/leean9/Vibrotactile-Stimulation pull 
 # git -C ~/Vibrotactile-Stimulation checkout model_testing
-echo "**git pull completed; project directory up-to-date.**"
+# echo "**git pull completed; project directory up-to-date.**"
 
 # Call model testing script
 export PYTHONPATH=$PYTHONPATH:/data001/projects/leean9/Vibrotactile-Stimulation  # So Python knows where to find src
