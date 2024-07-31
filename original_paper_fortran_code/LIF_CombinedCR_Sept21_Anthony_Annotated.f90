@@ -1,4 +1,4 @@
-! 2023-07-26 - Commented by Anthony, original code written by Ali.
+! 2023-07-26 - Commented by Anthony, original code written by Ali Khaledi-Nasab
 
 !!! Discrepencies between code and Paper !!!
 ! - D=1.3d0 >>> This param looks like kappa_noise, but is 50x the value stated 
