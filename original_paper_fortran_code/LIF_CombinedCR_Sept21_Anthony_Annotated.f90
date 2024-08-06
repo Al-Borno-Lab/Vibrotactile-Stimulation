@@ -262,7 +262,7 @@ open(unit=111,status='unknown',file=trim(outputpath)//trim(out_file(1)))  !! Out
 
 !!!!!!!!!! Open and read network_dimension data to variables !!!!!!!!!!
 open(unit=1, status='old',file=trim(net_path)//trim(net_file(1)))
-read(1,*)Nr,Npre,Npost,window,maxN_window
+read(1,*)Nr,Npre,Npost,window,maxN_window  ! Setting the network sparcity implicitly
 close(1)
 !! Calculate the parameters
 total_syn=dble(Nr*Npost)
@@ -342,8 +342,8 @@ open(unit=11, status='old',action='read',file=trim(net_path)//trim(net_file(11))
 do i=1,Nr
     read(2,*)postlink(i,:)
     read(3,*)presyn(i)
-    read(4,*)prelink1(i,:)
-    read(5,*)prelink2(i,:)
+    read(4,*)prelink1(i,:)  ! Presynaptic check's pre - read in line by line.
+    read(5,*)prelink2(i,:)  ! Presynaptic check's post - read in line by line.
     read(6,*)hat_post(i,:)
     read(7,*)dis_post(i,:)
     read(11,*)coor(i)
@@ -389,14 +389,14 @@ gs=0.d0
 gn0=0.d0
 gn=0.d0
 flag=0
-tsh=0.d0
-itrch=0
+tsh=0.d0      ! ???
+itrch=0       ! ???
 tspk=0.d0
 itime_save=0
 poi1=0
-sw=0  ! Synaptic weight
+sw=0          ! Synaptic weight
 !call init_weights_Nr(Nr,Npost,mean_weight,adj,sw0)
-call init_weights(Nr,Npost,mean_weight,sw)
+call init_weights(Nr,Npost,mean_weight,sw)  ! Initialize weight to one within the Npre and Npost until mean-weight is achieved.
 
 
 
@@ -476,9 +476,9 @@ do itime=1,jtime
                 tspk(j,2)=t
                 v(j)=v_spike; vth(j)=vth_spike
 
-                do prei=1,presyn(j)
-                    pre=prelink1(j,prei)
-                    pre1=prelink2(j,prei)
+                do prei=1,presyn(j)              ! presyn is read in from a file that is 200x1 with each value no greater than 24
+                    pre=prelink1(j,prei)         ! prelink1 is a matrix of 200x24
+                    pre1=prelink2(j,prei)        ! prelink2 is a matrix of 200x24
                     dt2= t-tspk(pre,2)-t_d
                     if (dt2 .ge. 0.d0) then
                         !sw0(pre,j)= sw0(pre,j)+lamda*exp(-dt2/taup)
