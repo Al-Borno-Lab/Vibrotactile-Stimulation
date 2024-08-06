@@ -257,7 +257,7 @@ write (out_file(1),"('1_odpar_fCR_',i0,'_M_',i0,'_Astim_',i0,'_net_',i0,'_dur',i
 !write (out_file(2),"('2_spk_fCR_',i0,'_M_',i0,'_sigma_CR_',i0,'_Astim_',i0,'_net_',i0,'_dur',i0,'.dat')") int(f_CR*10),M_electrode,int(SD_CR*1000),int(A_stim*1000),net_index,stim_dur
 
        
-open(unit=111,status='unknown',file=trim(outputpath)//trim(out_file(1)))  !! Output file 111
+open(unit=111,status='unknown',file=trim(outputpath)//trim(out_file(1)))  !! Output file 111 for things like mean synaptic weight
 !open(unit=224,status='unknown',file=trim(outputpath)//trim(out_file(2)))
 
 !!!!!!!!!! Open and read network_dimension data to variables !!!!!!!!!!
@@ -476,6 +476,10 @@ do itime=1,jtime
                 tspk(j,2)=t
                 v(j)=v_spike; vth(j)=vth_spike
 
+                ! NOTE: postlink, prelink1, and prelink2 corresponds together.
+                ! postlink - marks the postsynaptic partner of each neuron specified by the row index of the matrix.
+                ! prelink1 - marks the presynaptic partner of the neuron specified by the row index.
+                ! prelink2 - marks the column-index in postlink for each of the corresponding entry in prelink1.
                 do prei=1,presyn(j)              ! presyn is read in from a file that is 200x1 with each value no greater than 24
                     pre=prelink1(j,prei)         ! prelink1 is a matrix of 200x24
                     pre1=prelink2(j,prei)        ! prelink2 is a matrix of 200x24
