@@ -262,7 +262,7 @@ open(unit=111,status='unknown',file=trim(outputpath)//trim(out_file(1)))  !! Out
 
 !!!!!!!!!! Open and read network_dimension data to variables !!!!!!!!!!
 open(unit=1, status='old',file=trim(net_path)//trim(net_file(1)))
-read(1,*)Nr,Npre,Npost,window,maxN_window  ! Setting the network sparcity implicitly
+read(1,*)Nr,Npre,Npost,window,maxN_window  ! Setting the network sparsity implicitly
 close(1)
 !! Calculate the parameters
 total_syn=dble(Nr*Npost)
